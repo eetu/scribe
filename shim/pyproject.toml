@@ -7,7 +7,7 @@ dependencies = [
   "audible>=0.10",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
-  "cryptography>=42",
+  "cryptography>=48.0.0",
   "python-dotenv>=1.0",
 ]
 
