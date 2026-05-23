@@ -712,8 +712,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "audible", specifier = ">=0.10" },
-    { name = "cryptography", specifier = ">=42" },
-    { name = "fastapi", specifier = ">=0.115" },
+    { name = "cryptography", specifier = ">=48.0.0" },
+    { name = "fastapi", specifier = ">=0.136.1" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]

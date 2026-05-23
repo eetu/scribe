@@ -100,7 +100,9 @@ async fn upsert(state: &AppState, account_id: &str, book: &LibraryBook) -> Resul
     let narrators_json = serde_json::to_string(&book.narrators).unwrap_or_else(|_| "[]".into());
     let series_title = book.series.first().and_then(|s| s.title.clone());
     let series_sequence = book.series.first().and_then(|s| s.sequence.clone());
-    let runtime_ms = book.runtime_length_min.map(|m| m * 60_000);
+    // rusqlite 0.39 dropped `u64: ToSql`. SQLite stores INTEGER as i64
+    // anyway — cast at the boundary.
+    let runtime_ms: Option<i64> = book.runtime_length_min.map(|m| (m * 60_000) as i64);
     let cover_url = book.cover_url.clone();
     let status = book.status.clone();
     let purchase_date = book.purchase_date.clone();

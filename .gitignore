@@ -1,5 +1,11 @@
 target/
 node_modules/
+.pnp.cjs
+.pnp.loader.mjs
+.yarn/cache/
+.yarn/install-state.gz
+.yarn/build-state.yml
+.yarn/unplugged/
 .env
 .env.local
 *.log
