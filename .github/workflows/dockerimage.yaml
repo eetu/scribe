@@ -1,0 +1,197 @@
+name: Create and publish Docker images
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  # Backend image keeps the bare `scribe` name. Sibling packages:
+  # `scribe-shim` (Audible sidecar) and `scribe-press` (DRM-strip
+  # worker, optional — usually runs native on the mini via launchd).
+  IMAGE_BACKEND: ${{ github.repository }}
+  IMAGE_SHIM: ${{ github.repository }}-shim
+  IMAGE_PRESS: ${{ github.repository }}-press
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Detect build-relevant changes
+        id: filter
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'shared/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Dockerfile'
+              - '.github/workflows/dockerimage.yaml'
+            shim:
+              - 'shim/**'
+              - 'Dockerfile'
+              - '.github/workflows/dockerimage.yaml'
+            press:
+              - 'press/**'
+              - 'shared/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Dockerfile'
+              - '.github/workflows/dockerimage.yaml'
+
+      - name: Decide which images to build
+        id: gate
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] \
+             || [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "shim=true" >> "$GITHUB_OUTPUT"
+            echo "press=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
+            echo "shim=${{ steps.filter.outputs.shim }}" >> "$GITHUB_OUTPUT"
+            echo "press=${{ steps.filter.outputs.press }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        if: steps.gate.outputs.backend == 'true' || steps.gate.outputs.shim == 'true' || steps.gate.outputs.press == 'true'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: "arm64"
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.backend == 'true' || steps.gate.outputs.shim == 'true' || steps.gate.outputs.press == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        if: steps.gate.outputs.backend == 'true' || steps.gate.outputs.shim == 'true' || steps.gate.outputs.press == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # -- Backend image (web UI + axum) --
+      - name: Extract metadata for backend image
+        id: meta_backend
+        if: steps.gate.outputs.backend == 'true'
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_BACKEND }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push backend image
+        if: steps.gate.outputs.backend == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: ${{ steps.meta_backend.outputs.tags }}
+          labels: ${{ steps.meta_backend.outputs.labels }}
+          build-args: |
+            SCRIBE_IMAGE_TAG=${{ fromJSON(steps.meta_backend.outputs.json).labels['org.opencontainers.image.created'] }}
+          platforms: linux/arm64
+          # Skip provenance + SBOM attestations: each one becomes its
+          # own GHCR "version", inflating the package version count 3×
+          # per push for no real benefit on a single-platform image.
+          provenance: false
+          sbom: false
+
+      # -- Shim image (Python FastAPI sidecar) --
+      - name: Extract metadata for shim image
+        id: meta_shim
+        if: steps.gate.outputs.shim == 'true'
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_SHIM }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push shim image
+        if: steps.gate.outputs.shim == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: shim-runner
+          push: true
+          tags: ${{ steps.meta_shim.outputs.tags }}
+          labels: ${{ steps.meta_shim.outputs.labels }}
+          platforms: linux/arm64
+          provenance: false
+          sbom: false
+
+      # -- Press image (optional ffmpeg worker) --
+      - name: Extract metadata for press image
+        id: meta_press
+        if: steps.gate.outputs.press == 'true'
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PRESS }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push press image
+        if: steps.gate.outputs.press == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: press-runner
+          push: true
+          tags: ${{ steps.meta_press.outputs.tags }}
+          labels: ${{ steps.meta_press.outputs.labels }}
+          platforms: linux/arm64
+          provenance: false
+          sbom: false
+
+      # Prune untagged versions for each package. One delete-package
+      # step per image so each one's history is independently trimmed.
+      - name: Prune untagged backend image versions
+        if: steps.gate.outputs.backend == 'true'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: scribe
+          package-type: container
+          delete-only-untagged-versions: true
+          min-versions-to-keep: 5
+
+      - name: Prune untagged shim image versions
+        if: steps.gate.outputs.shim == 'true'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: scribe-shim
+          package-type: container
+          delete-only-untagged-versions: true
+          min-versions-to-keep: 5
+
+      - name: Prune untagged press image versions
+        if: steps.gate.outputs.press == 'true'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: scribe-press
+          package-type: container
+          delete-only-untagged-versions: true
+          min-versions-to-keep: 5

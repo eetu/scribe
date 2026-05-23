@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: "Frontend"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn lint
+      - run: yarn format
+      - run: yarn typecheck
+      - run: yarn build
+
+  backend:
+    name: "Backend (Rust workspace)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Workspace lives at the repo root; backend, press and shared
+          # are members. Caching the root target/ dir gives one cache
+          # across all three crates.
+          workspaces: "."
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+
+  shim:
+    name: "Shim (Python)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shim
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      # Smoke-import the FastAPI app so a broken module surfaces in CI
+      # before reaching the deploy step. Routes are exercised against
+      # real Audible in the periodic smoke test, not here.
+      - run: SHIM_DEV=1 uv run python -c "from shim.main import app; assert len(app.routes) > 5"

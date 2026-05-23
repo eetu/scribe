@@ -1,0 +1,40 @@
+{
+  "name": "scribe-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint eslint.config.js src",
+    "lint:fix": "eslint eslint.config.js src --fix",
+    "format": "prettier --check src",
+    "format:fix": "prettier --write src",
+    "typecheck": "tsc --noEmit",
+    "validate": "yarn typecheck && yarn lint && yarn format",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@tanstack/react-router": "^1.170.4",
+    "classnames": "^2.5.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "swr": "^2.4.1",
+    "usehooks-ts": "^3.1.1"
+  },
+  "devDependencies": {
+    "@tanstack/eslint-plugin-router": "^1.162.0",
+    "@tanstack/router-plugin": "^1.168.6",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "eslint": "^10.4.0",
+    "eslint-config": "github:eetu/eslint-config#v2.0.1",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
+  },
+  "packageManager": "yarn@4.12.0"
+}
