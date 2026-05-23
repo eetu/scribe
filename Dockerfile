@@ -4,7 +4,7 @@
 FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 
 # --- Stage 1: Build frontend (native, output is platform-independent) ---
-FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend-build
 ARG SCRIBE_IMAGE_TAG
 ENV VITE_SCRIBE_IMAGE_TAG=$SCRIBE_IMAGE_TAG
 WORKDIR /app
