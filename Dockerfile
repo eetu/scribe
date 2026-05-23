@@ -89,7 +89,7 @@ CMD ["./scribe-backend"]
 # `-audible_key` / `-activation_bytes`, and stays tiny — image lands
 # around 80MB vs. Debian's 400MB. Bind to 0.0.0.0 by default since the
 # image is expected to sit behind a reverse proxy with bearer auth.
-FROM alpine:3.20 AS press-runner
+FROM alpine:3.23.4 AS press-runner
 WORKDIR /app
 LABEL org.opencontainers.image.description="scribe-press — DRM strip + remux worker for scribe"
 LABEL org.opencontainers.image.source="https://github.com/eetu/scribe"
