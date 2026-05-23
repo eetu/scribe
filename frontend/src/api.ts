@@ -1,0 +1,132 @@
+export type Status = {
+  service: string;
+  version: string;
+  shim_url: string;
+  shim_healthy: boolean;
+  press_url: string | null;
+  press_healthy: boolean;
+  dev_auth: boolean;
+  auto_enqueue: boolean;
+  library_dir: string;
+  original_dir: string;
+  poll_interval_min: number;
+};
+
+export type Me = { sub: string };
+
+export type Account = {
+  account_id: string;
+  locale: string | null;
+  email_masked: string;
+  customer_name: string | null;
+  expires_at: number | null;
+  needs_refresh: boolean;
+  needs_relogin: boolean;
+  last_synced_at: number | null;
+  book_count: number;
+  active_jobs: number;
+};
+
+export type Book = {
+  asin: string;
+  account_id: string;
+  title: string;
+  authors: string[];
+  cover_url: string | null;
+  status: string;
+  purchase_date: string | null;
+};
+
+export type Job = {
+  id: string;
+  asin: string;
+  account_id: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+  error: string | null;
+};
+
+export type LoginStartResp = {
+  session_id: string;
+  open_url: string;
+  instructions: string;
+};
+
+export type LoginFinishResp = {
+  account_id: string;
+  customer_name: string | null;
+  locale: string | null;
+};
+
+export type JobSseEvent =
+  | { kind: "phase"; phase: string; retry_count: number }
+  | { kind: "done"; m4b_path: string; aaxc_path: string }
+  | { kind: "failed"; message: string }
+  | { kind: "cancelled" };
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(path, {
+    ...init,
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
+  if (!r.ok) {
+    throw new ApiError(r.status, await r.text().catch(() => ""));
+  }
+  if (r.status === 204) return undefined as T;
+  return r.json() as Promise<T>;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    body: string,
+  ) {
+    super(`HTTP ${status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+  }
+}
+
+export const api = {
+  status: () => req<Status>("/status"),
+  me: () => req<Me>("/api/me"),
+  accounts: () => req<Account[]>("/api/accounts"),
+  loginStart: (body: { locale: string; with_username?: boolean }) =>
+    req<LoginStartResp>("/api/accounts/login/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  loginFinish: (body: { session_id: string; redirect_url: string }) =>
+    req<LoginFinishResp>("/api/accounts/login/finish", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  library: () => req<{ items: Book[] }>("/api/library"),
+  syncLibrary: (body: { account_id?: string; full?: boolean }) =>
+    req<{ syncs: unknown[] }>("/api/library/sync", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  refreshAccount: (account_id: string) =>
+    req<{ expires_at: number }>(`/api/accounts/${account_id}/refresh`, {
+      method: "POST",
+    }),
+  deregisterAccount: (account_id: string) =>
+    req<{ deregistered: boolean }>(`/api/accounts/${account_id}/deregister`, {
+      method: "POST",
+    }),
+  jobs: () => req<{ items: Job[] }>("/api/jobs"),
+  enqueueJob: (body: { account_id: string; asin: string }) =>
+    req<{ job_id: string }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  enqueueAll: (body: { account_id?: string } = {}) =>
+    req<{ queued: number; accounts: number }>("/api/jobs/enqueue_all", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelJob: (id: string) =>
+    req<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  logout: () => req<void>("/auth/logout", { method: "POST" }),
+};
