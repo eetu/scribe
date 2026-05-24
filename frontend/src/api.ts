@@ -73,6 +73,12 @@ export type LoginFinishResp = {
 
 export type JobSseEvent =
   | { kind: "phase"; phase: string; retry_count: number }
+  | {
+      kind: "progress";
+      phase: string;
+      bytes_done: number;
+      bytes_total: number | null;
+    }
   | { kind: "done"; m4b_path: string; aaxc_path: string }
   | { kind: "failed"; message: string }
   | { kind: "cancelled" };

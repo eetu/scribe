@@ -64,9 +64,26 @@ impl Lifecycle {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QueueEvent {
-    Phase { phase: String, retry_count: u32 },
-    Done { m4b_path: String, aaxc_path: String },
-    Failed { message: String },
+    Phase {
+        phase: String,
+        retry_count: u32,
+    },
+    /// Live progress while the press worker is busy. `bytes_total` is
+    /// `None` when the upstream didn't advertise Content-Length (rare on
+    /// Audible's CDN but defensive). Frontend renders a precise progress
+    /// bar when total is known, indeterminate animation otherwise.
+    Progress {
+        phase: String,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+    },
+    Done {
+        m4b_path: String,
+        aaxc_path: String,
+    },
+    Failed {
+        message: String,
+    },
     Cancelled,
 }
 
@@ -403,7 +420,11 @@ impl Inner {
                 activation_bytes_override: None,
             };
 
-            match pipeline::run(&self.state, input).await {
+            // Hand the per-job broadcast tx into the pipeline so press's
+            // polled status surfaces as live Progress events on the same
+            // SSE stream the frontend is already consuming.
+            let progress_tx = self.channel(job_id).await;
+            match pipeline::run(&self.state, input, Some(progress_tx)).await {
                 Ok(out) => {
                     self.set_phase(job_id, Lifecycle::WritingNas, attempt).await?;
                     let m4b = out.m4b_path.display().to_string();

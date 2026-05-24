@@ -28,12 +28,32 @@ const PHASE_ORDER = [
 export default function JobRow({ job, book, onCancel }: Props) {
   const theme = useTheme();
   const active = ACTIVE_PHASES.has(job.status);
-  const ev = useJobSse(active ? job.id : null);
+  const { status: ev, progress: liveProgress } = useJobSse(
+    active ? job.id : null,
+  );
 
-  // Effective status — prefer the live SSE event when present, falls back
-  // to the DB row.
-  const status = ev?.kind === "phase" ? ev.phase : job.status;
-  const progress = computeProgress(status);
+  // Effective status. Priority order:
+  //   1. Live Progress event phase — press's actual sub-state (downloading
+  //      vs converting). The queue's coarse `downloading` covers the
+  //      whole press round-trip, so without this the chip lies during
+  //      the ffmpeg pass.
+  //   2. Most recent Phase event — fires on queue lifecycle transitions.
+  //   3. The DB row's last-saved status.
+  const status =
+    liveProgress?.phase ??
+    (ev?.kind === "phase" ? ev.phase : null) ??
+    job.status;
+  // Byte-precise progress wins over the phase-bucketed default whenever
+  // the press worker has told us a total.
+  const precise =
+    liveProgress && liveProgress.bytes_total
+      ? Math.min(
+          100,
+          Math.round((liveProgress.bytes_done / liveProgress.bytes_total) * 100),
+        )
+      : null;
+  const progress = precise ?? computeProgress(status);
+  const bytesLabel = formatBytesLabel(liveProgress);
 
   return (
     <div
@@ -96,9 +116,23 @@ export default function JobRow({ job, book, onCancel }: Props) {
           fontSize: 12,
           color:
             status === "failed" ? theme.colors.error : theme.colors.text.muted,
+          textAlign: "right",
+          minWidth: 100,
         }}
       >
-        {status.replace("_", " ")}
+        <div>{status.replace("_", " ")}</div>
+        {bytesLabel && (
+          <div
+            css={{
+              fontFamily: "monospace",
+              fontSize: 10,
+              color: theme.colors.text.muted,
+              marginTop: 2,
+            }}
+          >
+            {bytesLabel}
+          </div>
+        )}
       </span>
       <button
         onClick={onCancel}
@@ -125,6 +159,24 @@ export default function JobRow({ job, book, onCancel }: Props) {
       </button>
     </div>
   );
+}
+
+function formatBytesLabel(
+  p: { bytes_done: number; bytes_total: number | null } | null,
+): string | null {
+  if (!p) return null;
+  const done = formatBytes(p.bytes_done);
+  if (p.bytes_total) {
+    return `${done} / ${formatBytes(p.bytes_total)}`;
+  }
+  return done;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function computeProgress(phase: string): number {

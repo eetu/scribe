@@ -2,30 +2,57 @@ import { useEffect, useState } from "react";
 
 import type { JobSseEvent } from "../api";
 
+export type JobLive = {
+  /** Most recent terminal/phase event. */
+  status: JobSseEvent | null;
+  /** Latest byte counter for the active phase. Cleared on phase change. */
+  progress: {
+    phase: string;
+    bytes_done: number;
+    bytes_total: number | null;
+  } | null;
+};
+
 /**
- * Per-job SSE subscription. Returns the most recent event seen.
- * Returns null while the EventSource is opening or after it errors out.
+ * Per-job SSE subscription. Tracks the latest phase/done/failed event and
+ * the most recent byte-progress sample separately so the UI can render
+ * both a status chip and a precise progress bar from one EventSource.
  */
-export function useJobSse(jobId: string | null): JobSseEvent | null {
-  const [event, setEvent] = useState<JobSseEvent | null>(null);
+export function useJobSse(jobId: string | null): JobLive {
+  const [live, setLive] = useState<JobLive>({ status: null, progress: null });
 
   useEffect(() => {
     if (!jobId) return;
+    setLive({ status: null, progress: null });
     const es = new EventSource(`/api/jobs/${jobId}/sse`);
     es.onmessage = (e) => {
       try {
-        setEvent(JSON.parse(e.data) as JobSseEvent);
+        const ev = JSON.parse(e.data) as JobSseEvent;
+        setLive((prev) => {
+          if (ev.kind === "progress") {
+            return { ...prev, progress: ev };
+          }
+          // Any non-progress event (phase / done / failed / cancelled)
+          // updates status. Clear progress when phase actually changes
+          // so a stale byte counter from the previous phase doesn't show.
+          const phaseChanged =
+            ev.kind === "phase" &&
+            prev.progress &&
+            prev.progress.phase !== ev.phase;
+          return {
+            status: ev,
+            progress: phaseChanged ? null : prev.progress,
+          };
+        });
       } catch {
         // ignore malformed frames; the next one will arrive shortly.
       }
     };
     es.onerror = () => {
-      // Let SWR refetch on close — the backend probably finished and the
-      // broadcast channel is empty.
       es.close();
     };
     return () => es.close();
   }, [jobId]);
 
-  return event;
+  return live;
 }

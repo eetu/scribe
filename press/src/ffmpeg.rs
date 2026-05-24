@@ -68,6 +68,7 @@ async fn copy_local(
     {
         let mut s = state.lock().await;
         s.aaxc_bytes = bytes;
+        s.aaxc_bytes_total = Some(total);
         let _ = s.events.send(JobEvent::Downloading {
             bytes_done: bytes,
             bytes_total: Some(total),
@@ -82,6 +83,13 @@ async fn download_http(state: &Arc<Mutex<JobState>>, url: &str, dest: &std::path
         .build()?;
     let resp = client.get(url).send().await?.error_for_status()?;
     let total = resp.content_length();
+    {
+        // Stash the total so /jobs/{id} status can surface it for the
+        // backend's progress polling — broadcast events go to subscribers
+        // only, but status snapshots need it too.
+        let mut s = state.lock().await;
+        s.aaxc_bytes_total = total;
+    }
     let mut stream = resp.bytes_stream();
     let mut file = tokio::fs::File::create(dest).await?;
     use futures_util::StreamExt;

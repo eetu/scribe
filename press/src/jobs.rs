@@ -72,6 +72,10 @@ pub struct JobStatus {
     pub id: Uuid,
     pub phase: Phase,
     pub aaxc_bytes: u64,
+    /// Advertised Content-Length from the Audible CDN. `None` if the
+    /// upstream didn't send one (rare); frontend renders an
+    /// indeterminate progress bar in that case.
+    pub aaxc_bytes_total: Option<u64>,
     pub m4b_bytes: u64,
     pub error: Option<String>,
 }
@@ -82,6 +86,7 @@ pub struct JobState {
     pub dir: PathBuf,
     pub phase: Phase,
     pub aaxc_bytes: u64,
+    pub aaxc_bytes_total: Option<u64>,
     pub m4b_bytes: u64,
     pub error: Option<String>,
     pub events: broadcast::Sender<JobEvent>,
@@ -102,6 +107,7 @@ impl JobState {
             id: self.id,
             phase: self.phase,
             aaxc_bytes: self.aaxc_bytes,
+            aaxc_bytes_total: self.aaxc_bytes_total,
             m4b_bytes: self.m4b_bytes,
             error: self.error.clone(),
         }
@@ -135,6 +141,7 @@ impl JobMap {
             dir,
             phase: Phase::Queued,
             aaxc_bytes: 0,
+            aaxc_bytes_total: None,
             m4b_bytes: 0,
             error: None,
             events: tx,

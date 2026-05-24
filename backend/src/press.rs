@@ -52,6 +52,8 @@ pub struct PressJobStatus {
     pub id: Uuid,
     pub phase: String,
     pub aaxc_bytes: u64,
+    #[serde(default)]
+    pub aaxc_bytes_total: Option<u64>,
     pub m4b_bytes: u64,
     pub error: Option<String>,
 }

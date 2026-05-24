@@ -40,7 +40,11 @@ pub struct PipelineOutcome {
     pub m4b_bytes: u64,
 }
 
-pub async fn run(state: &AppState, input: PipelineInput) -> Result<PipelineOutcome, AppError> {
+pub async fn run(
+    state: &AppState,
+    input: PipelineInput,
+    progress_tx: Option<tokio::sync::broadcast::Sender<crate::queue::QueueEvent>>,
+) -> Result<PipelineOutcome, AppError> {
     let shim = ShimClient::new(state);
     let press = PressClient::new(state);
 
@@ -67,7 +71,7 @@ pub async fn run(state: &AppState, input: PipelineInput) -> Result<PipelineOutco
     tracing::info!(%press_job_id, asin = %input.asin, "press job submitted");
 
     // 3. poll until ready or failed
-    poll_until_terminal(&press, press_job_id).await?;
+    poll_until_terminal(&press, press_job_id, progress_tx.as_ref()).await?;
 
     // 4 + 5. stream both artifacts to NAS using the configured naming templates.
     let naming_input = crate::filenaming::NamingInput {
@@ -238,10 +242,34 @@ async fn resolve_source(
     })
 }
 
-async fn poll_until_terminal(press: &PressClient<'_>, job_id: Uuid) -> Result<(), AppError> {
+async fn poll_until_terminal(
+    press: &PressClient<'_>,
+    job_id: Uuid,
+    progress_tx: Option<&tokio::sync::broadcast::Sender<crate::queue::QueueEvent>>,
+) -> Result<(), AppError> {
     let mut sleep = Duration::from_millis(500);
     loop {
         let s = press.status(job_id).await?;
+        // Fan out a Progress event on every poll regardless of phase so
+        // the UI sees the byte counter advance during both downloading
+        // and converting. Listeners on the broadcast channel may have
+        // come and gone — `send` errors when there are zero, which is
+        // fine; we just drop the event.
+        if let Some(tx) = progress_tx {
+            let bytes_done = match s.phase.as_str() {
+                "converting" | "ready" => s.m4b_bytes,
+                _ => s.aaxc_bytes,
+            };
+            let bytes_total = match s.phase.as_str() {
+                "converting" | "ready" => None,
+                _ => s.aaxc_bytes_total,
+            };
+            let _ = tx.send(crate::queue::QueueEvent::Progress {
+                phase: s.phase.clone(),
+                bytes_done,
+                bytes_total,
+            });
+        }
         match s.phase.as_str() {
             "ready" => return Ok(()),
             "failed" => {
