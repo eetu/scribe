@@ -80,7 +80,7 @@ pub async fn run(state: &AppState, input: PipelineInput) -> Result<PipelineOutco
         series_sequence: src.series_sequence.as_deref(),
         release_date: src.release_date.as_deref(),
     };
-    let m4b_path = crate::filenaming::library_path(
+    let canonical_m4b = crate::filenaming::library_path(
         &state.cfg.library_dir,
         &state.cfg.naming.library,
         &naming_input,
@@ -90,6 +90,11 @@ pub async fn run(state: &AppState, input: PipelineInput) -> Result<PipelineOutco
         &state.cfg.naming.original,
         &naming_input,
     );
+    // Collision check: if the canonical path is taken by a previous download
+    // of a *different* ASIN (different region of the same title, different
+    // edition, etc.), suffix the new file with " (asin)" so both survive on
+    // disk. Re-downloads of the same ASIN overwrite in place.
+    let m4b_path = resolve_unique_m4b_path(canonical_m4b, &input.asin, &aaxc_path).await;
     let aaxc_bytes = press
         .stream_to_file(press_job_id, Artifact::Aaxc, &aaxc_path)
         .await?;
@@ -130,6 +135,50 @@ pub async fn run(state: &AppState, input: PipelineInput) -> Result<PipelineOutco
         aaxc_bytes,
         m4b_bytes,
     })
+}
+
+/// If `canonical` is free, return it. Else read the existing scribe sidecar
+/// for the path's expected counterpart (sibling `.aaxc.scribe.json`) and
+/// compare ASINs:
+///   - matching ASIN → same book, allow overwrite (re-download flow).
+///   - mismatching ASIN or unknown ownership → suffix the m4b with the
+///     new ASIN so both editions live side by side.
+async fn resolve_unique_m4b_path(
+    canonical: std::path::PathBuf,
+    asin: &str,
+    aaxc_path: &std::path::Path,
+) -> std::path::PathBuf {
+    if !tokio::fs::try_exists(&canonical).await.unwrap_or(false) {
+        return canonical;
+    }
+    // Existing file. Check whether we own it under the same ASIN.
+    let sidecar_path = aaxc_path.with_extension({
+        let ext = aaxc_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("aaxc");
+        format!("{ext}.scribe.json")
+    });
+    if let Ok(raw) = tokio::fs::read_to_string(&sidecar_path).await {
+        if let Ok(sc) = serde_json::from_str::<scribe_shared::Sidecar>(&raw) {
+            if sc.asin == asin {
+                return canonical;
+            }
+        }
+    }
+    // Append " (asin)" to stem.
+    let stem = canonical
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = canonical
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("m4b");
+    let parent = canonical
+        .parent()
+        .unwrap_or(std::path::Path::new(""));
+    parent.join(format!("{stem} ({asin}).{ext}"))
 }
 
 struct ResolvedSource {

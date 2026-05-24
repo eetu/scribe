@@ -6,11 +6,21 @@ type Props = {
   book: Book;
   job: Job | null;
   onDownload: () => void;
+  /** ASINs of other library rows sharing this title + primary author.
+   * Surfaced as a small "dupe" badge so the user can decide whether to
+   * download both editions or skip one. Empty when no overlap. */
+  duplicateOf?: string[];
 };
 
-export default function BookCard({ book, job, onDownload }: Props) {
+export default function BookCard({
+  book,
+  job,
+  onDownload,
+  duplicateOf = [],
+}: Props) {
   const theme = useTheme();
   const status = jobStatus(job);
+  const isDuplicate = duplicateOf.length > 0;
 
   return (
     <article
@@ -79,7 +89,25 @@ export default function BookCard({ book, job, onDownload }: Props) {
             marginTop: 4,
           }}
         >
-          <StatusChip label={status.label} tone={status.tone} />
+          <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <StatusChip label={status.label} tone={status.tone} />
+            {isDuplicate && (
+              <span
+                title={`Another copy in your library: ${duplicateOf.join(", ")}. Likely same recording across regions, but Audible doesn't guarantee — content may differ.`}
+                css={{
+                  fontFamily: theme.fonts.heading,
+                  fontSize: 10,
+                  padding: "2px 6px",
+                  borderRadius: 999,
+                  border: `1px solid ${theme.colors.text.muted}`,
+                  color: theme.colors.text.muted,
+                  cursor: "help",
+                }}
+              >
+                dupe
+              </span>
+            )}
+          </div>
           {status.canEnqueue && (
             <button
               onClick={onDownload}

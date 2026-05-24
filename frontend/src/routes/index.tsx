@@ -48,6 +48,25 @@ function LibraryPage() {
     if (!prior || j.updated_at > prior.updated_at) jobByAsin.set(j.asin, j);
   }
 
+  // Heuristic dupe detection — same title + primary author across distinct
+  // ASINs. Catches the common "same book on US and UK accounts" case
+  // without making any claim about content equality (Audible doesn't
+  // expose that). The badge is a warning, not an auto-skip.
+  const sig = (b: Book) =>
+    `${b.title.toLowerCase().trim()}|${(b.authors[0] ?? "").toLowerCase().trim()}`;
+  const sigToAsins = new Map<string, string[]>();
+  for (const b of items) {
+    const k = sig(b);
+    const arr = sigToAsins.get(k) ?? [];
+    if (!arr.includes(b.asin)) arr.push(b.asin);
+    sigToAsins.set(k, arr);
+  }
+  const dupesByAsin = new Map<string, string[]>();
+  for (const b of items) {
+    const peers = (sigToAsins.get(sig(b)) ?? []).filter((a) => a !== b.asin);
+    if (peers.length > 0) dupesByAsin.set(b.asin, peers);
+  }
+
   return (
     <>
       <div
@@ -130,6 +149,7 @@ function LibraryPage() {
             key={`${b.account_id}:${b.asin}`}
             book={b}
             job={jobByAsin.get(b.asin) ?? null}
+            duplicateOf={dupesByAsin.get(b.asin)}
             onDownload={async () => {
               await api.enqueueJob({ account_id: b.account_id, asin: b.asin });
               mutate("/api/jobs");
