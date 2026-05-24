@@ -15,6 +15,12 @@ pub enum AppError {
     BadRequest(String),
     #[error("upstream: {0}")]
     Upstream(String),
+    /// Audible refused to issue a voucher (410 from shim). Plus catalog
+    /// rotation, cross-region denial, or otherwise unplayable. Terminal —
+    /// no retry will help, and the user-facing label should explain the
+    /// difference from a generic network failure.
+    #[error("license denied: {0}")]
+    LicenseDenied(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -27,6 +33,7 @@ impl AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Upstream(_) => StatusCode::BAD_GATEWAY,
+            AppError::LicenseDenied(_) => StatusCode::GONE,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -41,7 +48,10 @@ impl IntoResponse for AppError {
         }));
         if status.is_server_error() {
             tracing::error!(?self, "request failed");
-        } else if matches!(self, AppError::Forbidden | AppError::Upstream(_)) {
+        } else if matches!(
+            self,
+            AppError::Forbidden | AppError::Upstream(_) | AppError::LicenseDenied(_)
+        ) {
             tracing::warn!(?self, "request rejected");
         }
         (status, body).into_response()

@@ -108,7 +108,11 @@ export default function BookCard({
           }}
         >
           <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <StatusChip label={status.label} tone={status.tone} />
+            <StatusChip
+              label={status.label}
+              tone={status.tone}
+              title={status.tooltip}
+            />
             {isDuplicate && (
               <span
                 title={`Another copy in your library: ${duplicateOf.join(", ")}. Likely same recording across regions, but Audible doesn't guarantee — content may differ.`}
@@ -156,9 +160,11 @@ export default function BookCard({
 function StatusChip({
   label,
   tone,
+  title,
 }: {
   label: string;
   tone: "muted" | "active" | "ok" | "err";
+  title?: string;
 }) {
   const theme = useTheme();
   const color =
@@ -171,11 +177,13 @@ function StatusChip({
           : theme.colors.text.muted;
   return (
     <span
+      title={title}
       css={{
         fontFamily: theme.fonts.heading,
         fontSize: 11,
         color,
         textTransform: "lowercase",
+        cursor: title ? "help" : undefined,
       }}
     >
       {label}
@@ -187,12 +195,24 @@ function jobStatus(job: Job | null): {
   label: string;
   tone: "muted" | "active" | "ok" | "err";
   canEnqueue: boolean;
+  tooltip?: string;
 } {
   if (!job) return { label: "new", tone: "muted", canEnqueue: true };
   if (job.status === "done")
     return { label: "done", tone: "ok", canEnqueue: false };
-  if (job.status === "failed")
-    return { label: "failed", tone: "err", canEnqueue: true };
+  if (job.status === "failed") {
+    // License-denied failures are terminal: Audible has refused to issue
+    // a voucher (Plus catalog rotation, region mismatch). Retrying won't
+    // help, so flag the chip distinctly and keep canEnqueue off — user
+    // can still force-retry manually but we don't lure them into it.
+    const denied = job.error?.toLowerCase().startsWith("license denied");
+    return {
+      label: denied ? "unavailable" : "failed",
+      tone: "err",
+      canEnqueue: !denied,
+      tooltip: job.error ?? undefined,
+    };
+  }
   if (job.status === "cancelled")
     return { label: "cancelled", tone: "muted", canEnqueue: true };
   return {

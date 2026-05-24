@@ -19,7 +19,10 @@
 //!
 //! Retry: each job has a `retry_count` column. Transient failures (upstream
 //! errors, timeouts) bump it and re-queue with backoff. Hard failures
-//! (404, bad input) surface immediately.
+//! (404, bad input, license denied) surface immediately. License denial
+//! in particular — Audible Plus rotation, cross-region purchase, etc. —
+//! is permanent until the user takes action outside scribe, so retrying
+//! just wastes shim calls and shows the user a wrong "retrying" label.
 
 use std::collections::HashMap;
 use std::sync::Arc;

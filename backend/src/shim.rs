@@ -177,6 +177,17 @@ impl<'a> ShimClient<'a> {
             .get(self.url(&format!("/accounts/{account_id}/books/{asin}/voucher")))
             .send()
             .await?;
+        // 410 = Audible refused to license this ASIN to this customer
+        // (Plus catalog rotation, cross-region denial). Distinct from a
+        // generic 5xx so the queue can skip retries and the UI can
+        // label it as "license denied" rather than "failed".
+        if r.status() == reqwest::StatusCode::GONE {
+            let detail = r
+                .text()
+                .await
+                .unwrap_or_else(|_| "license denied".into());
+            return Err(AppError::LicenseDenied(detail));
+        }
         Ok(r.error_for_status()?.json().await?)
     }
 }
