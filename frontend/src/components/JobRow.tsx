@@ -49,7 +49,9 @@ export default function JobRow({ job, book, onCancel }: Props) {
     liveProgress && liveProgress.bytes_total
       ? Math.min(
           100,
-          Math.round((liveProgress.bytes_done / liveProgress.bytes_total) * 100),
+          Math.round(
+            (liveProgress.bytes_done / liveProgress.bytes_total) * 100,
+          ),
         )
       : null;
   const progress = precise ?? computeProgress(status);

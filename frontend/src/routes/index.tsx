@@ -91,10 +91,10 @@ function LibraryPage() {
           }}
         >
           {undownloaded} book{undownloaded === 1 ? "" : "s"} synced, nothing
-          downloaded yet. auto-sync only kicks in on the next audible
-          purchase — for the backlog, hit{" "}
-          <strong css={{ color: theme.colors.text.main }}>download all</strong>
-          {" "}or pick books individually.
+          downloaded yet. auto-sync only kicks in on the next audible purchase —
+          for the backlog, hit{" "}
+          <strong css={{ color: theme.colors.text.main }}>download all</strong>{" "}
+          or pick books individually.
         </div>
       )}
       <div
