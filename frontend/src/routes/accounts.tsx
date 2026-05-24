@@ -23,6 +23,7 @@ const LOCALES = [
   { code: "es", label: "ES (.es)" },
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
 function AccountsPage() {
   const theme = useTheme();
   const { data } = useSWR("/api/accounts", fetcher);
@@ -66,16 +67,17 @@ type Stage =
   | { kind: "idle" }
   | { kind: "starting" }
   | {
-      kind: "open";
-      session_id: string;
-      open_url: string;
-      instructions: string;
-      redirect: string;
-    }
+    kind: "open";
+    session_id: string;
+    open_url: string;
+    instructions: string;
+    redirect: string;
+  }
   | { kind: "finishing" }
   | { kind: "done"; account_id: string }
   | { kind: "error"; message: string };
 
+// eslint-disable-next-line react-refresh/only-export-components
 function LinkAccount() {
   const theme = useTheme();
   const [locale, setLocale] = useState("us");

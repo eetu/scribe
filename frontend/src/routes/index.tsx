@@ -12,6 +12,7 @@ const fetcher = () => api.library();
 const accountsFetcher = () => api.accounts();
 const jobsFetcher = () => api.jobs();
 
+// eslint-disable-next-line react-refresh/only-export-components
 function LibraryPage() {
   const theme = useTheme();
   const { data, isLoading } = useSWR("/api/library", fetcher);

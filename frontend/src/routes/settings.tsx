@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useTheme } from "@emotion/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment } from "react";
