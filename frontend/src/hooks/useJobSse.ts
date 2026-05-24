@@ -32,16 +32,19 @@ export function useJobSse(jobId: string | null): JobLive {
           if (ev.kind === "progress") {
             return { ...prev, progress: ev };
           }
-          // Any non-progress event (phase / done / failed / cancelled)
-          // updates status. Clear progress when phase actually changes
-          // so a stale byte counter from the previous phase doesn't show.
-          const phaseChanged =
-            ev.kind === "phase" &&
-            prev.progress &&
-            prev.progress.phase !== ev.phase;
+          // Queue Phase events are coarse ("downloading" covers the whole
+          // press round-trip including ffmpeg). Press Progress events are
+          // fine-grained ("downloading" → "converting"). They live on
+          // independent dimensions — don't let a Phase event clobber the
+          // Progress phase. Only terminal events drop progress so a
+          // completed job's stale counter doesn't linger.
+          const isTerminal =
+            ev.kind === "done" ||
+            ev.kind === "failed" ||
+            ev.kind === "cancelled";
           return {
             status: ev,
-            progress: phaseChanged ? null : prev.progress,
+            progress: isTerminal ? null : prev.progress,
           };
         });
       } catch {
