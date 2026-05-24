@@ -4,8 +4,10 @@
 //! Convention: written next to the AAXC in `SCRIBE_ORIGINAL_DIR` with
 //! the same basename + `.scribe.json` suffix:
 //!
-//!     original/Author/Title-{asin}.aaxc
-//!     original/Author/Title-{asin}.aaxc.scribe.json
+//! ```text
+//! original/Author/Title-{asin}.aaxc
+//! original/Author/Title-{asin}.aaxc.scribe.json
+//! ```
 //!
 //! Schema lives in `scribe_shared::Sidecar`. Write at the end of each
 //! successful pipeline run; read during the reconcile scan on boot or
