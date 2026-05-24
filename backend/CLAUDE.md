@@ -69,12 +69,19 @@ CREATE TABLE jobs (
 
 ## Polling loop
 
-`SCRIBE_POLL_INTERVAL_MIN` (default 5) drives a tokio interval. Each tick:
-for each account, GET shim `/library?num_results=10&sort_by=-PurchaseDate`,
-compare against `MAX(purchase_date) WHERE account_id=?`, enqueue any new
-ASINs as jobs. Manual `/api/library/sync` does a full paginated walk.
+Mimics human library opens, not a scraper timer. Each tick computes the
+next sleep as `base · (1 ± jitter)` where base = `SCRIBE_POLL_INTERVAL_MIN`
+(default 60) and jitter = `SCRIBE_POLL_JITTER_PERCENT / 100` (default 0.5).
+Outside the active window — `SCRIBE_POLL_ACTIVE_HOUR_START` to
+`SCRIBE_POLL_ACTIVE_HOUR_END` (default 07:00–23:00 local) — the loop
+sleeps until the next start with a random 0–30 min wake jitter so multiple
+hosts don't pile on at the same minute.
 
-Smart-backoff between 00:00 and 06:00 local: 30 min instead of 5.
+Each tick: for each account, GET shim
+`/library?num_results=10&sort_by=-PurchaseDate`, compare against
+`MAX(purchase_date) WHERE account_id=?`, enqueue any new ASINs as jobs
+when the owner profile's effective `auto_enqueue` is true. Manual
+`/api/library/sync` does a full paginated walk and bypasses the timer.
 
 ## Environment
 
@@ -86,7 +93,10 @@ Smart-backoff between 00:00 and 06:00 local: 30 min instead of 5.
 | `SCRIBE_PRESS_TOKEN` | unset | bearer for press auth |
 | `SCRIBE_LIBRARY_DIR` | `/mnt/audiobooks/library` | M4B output root |
 | `SCRIBE_ORIGINAL_DIR` | `/mnt/audiobooks/original` | untouched AAXC/AAX downloads from Audible |
-| `SCRIBE_POLL_INTERVAL_MIN` | `5` | new-book poll cadence |
+| `SCRIBE_POLL_INTERVAL_MIN` | `60` | base poll cadence in minutes |
+| `SCRIBE_POLL_JITTER_PERCENT` | `50` | uniform ± randomness on each interval |
+| `SCRIBE_POLL_ACTIVE_HOUR_START` | `7` | poll window start (local hour 0-23) |
+| `SCRIBE_POLL_ACTIVE_HOUR_END` | `23` | poll window end (local hour 0-23) |
 | `ABS_URL` | unset | audiobookshelf base URL |
 | `ABS_TOKEN` | unset | ABS API token |
 | `ABS_LIBRARY_ID` | unset | ABS library id to rescan |

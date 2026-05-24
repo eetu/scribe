@@ -13,6 +13,9 @@ pub struct Config {
     pub library_dir: PathBuf,
     pub original_dir: PathBuf,
     pub poll_interval_min: u64,
+    pub poll_jitter_percent: u32,
+    pub poll_active_hour_start: u32,
+    pub poll_active_hour_end: u32,
     pub job_concurrency: usize,
     pub job_retry_max: u32,
     pub auto_enqueue_new: bool,
@@ -47,7 +50,19 @@ impl Config {
             poll_interval_min: env::var("SCRIBE_POLL_INTERVAL_MIN")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(5),
+                .unwrap_or(60),
+            poll_jitter_percent: env::var("SCRIBE_POLL_JITTER_PERCENT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50),
+            poll_active_hour_start: env::var("SCRIBE_POLL_ACTIVE_HOUR_START")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(7),
+            poll_active_hour_end: env::var("SCRIBE_POLL_ACTIVE_HOUR_END")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(23),
             job_concurrency: env::var("SCRIBE_JOB_CONCURRENCY")
                 .ok()
                 .and_then(|s| s.parse().ok())

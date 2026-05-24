@@ -37,10 +37,12 @@ Per-area instructions in `backend/CLAUDE.md`, `press/CLAUDE.md`,
 - **Pi memory budget.** 1 GB total, shared with halo/chat/abs/kanidm/etc.
   Scribe must not buffer book files in RAM. All large IO is streamed —
   CDN → press → NAS — via `tokio::io::copy` over reqwest byte streams.
-- **Polling.** New-book poll interval defaults to 5 minutes
-  (`SCRIBE_POLL_INTERVAL_MIN`). Uses `?sort_by=-PurchaseDate&num_results=10`
-  cheap call. Smart-backoff overnight (00:00–06:00 local → 30 min) added if
-  it ever rate-limits.
+- **Polling.** Mimics human library opens, not a scraper timer. Base
+  cadence `SCRIBE_POLL_INTERVAL_MIN` (default 60) ± `SCRIBE_POLL_JITTER_PERCENT`
+  (default 50%). Sleeps until next `SCRIBE_POLL_ACTIVE_HOUR_START` (default 7)
+  outside the active window (07:00–23:00 local by default), with a random
+  0–30 min wake jitter. Cheap `?sort_by=-PurchaseDate&num_results=10` call
+  per tick — never a full library walk on the timer.
 - **Design system.** Tokens copied verbatim from halo's `themes.ts`. Don't
   fork — when halo evolves, copy across so the family stays aligned. Only
   intentional divergence is `Wordmark.tsx` (quill stroke + dot).

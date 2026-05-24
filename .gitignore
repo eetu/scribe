@@ -20,3 +20,4 @@ __pycache__/
 *.db-wal
 *.db-shm
 scribe.db*
+shim/data/
