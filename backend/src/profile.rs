@@ -84,8 +84,21 @@ pub async fn resolve_or_create(
         return Ok(p);
     }
 
-    // Auto-create unless closed.
-    if !state.cfg.open_registration {
+    // Auto-create policy:
+    //   - open_registration=1 → any kanidm-authenticated user gets a profile
+    //   - closed + email matches SCRIBE_ADMIN_EMAIL → admin still bootstraps
+    //   - closed + no admin match → 403 (random users blocked)
+    let is_admin_email = state
+        .cfg
+        .admin_email
+        .as_ref()
+        .is_some_and(|e| e.eq_ignore_ascii_case(&email_s));
+    if !state.cfg.open_registration && !is_admin_email {
+        tracing::warn!(
+            sub = %sub_s,
+            email = %email_s,
+            "closed registration blocked login (email != SCRIBE_ADMIN_EMAIL)"
+        );
         return Err(AppError::Forbidden);
     }
     let role = pick_role(state, &email_s).await?;

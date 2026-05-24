@@ -41,6 +41,8 @@ impl IntoResponse for AppError {
         }));
         if status.is_server_error() {
             tracing::error!(?self, "request failed");
+        } else if matches!(self, AppError::Forbidden | AppError::Upstream(_)) {
+            tracing::warn!(?self, "request rejected");
         }
         (status, body).into_response()
     }
