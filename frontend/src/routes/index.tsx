@@ -68,8 +68,35 @@ function LibraryPage() {
     if (peers.length > 0) dupesByAsin.set(b.asin, peers);
   }
 
+  // Backlog hint: books exist but nothing is queued (e.g., first deploy
+  // after linking an account). Auto-enqueue only fires when a *new*
+  // purchase shows up, so the existing library sits until the user
+  // clicks "download all" or buys something new on Audible.
+  const undownloaded = items.filter((b) => !jobByAsin.has(b.asin)).length;
+  const showBacklogHint = undownloaded > 0 && (jobs?.items ?? []).length === 0;
+
   return (
     <>
+      {showBacklogHint && (
+        <div
+          css={{
+            background: theme.colors.background.main,
+            border: `1px solid ${theme.colors.border}`,
+            borderRadius: theme.border.radius,
+            padding: "10px 14px",
+            marginBottom: 16,
+            fontSize: 13,
+            color: theme.colors.text.muted,
+            lineHeight: 1.5,
+          }}
+        >
+          {undownloaded} book{undownloaded === 1 ? "" : "s"} synced, nothing
+          downloaded yet. auto-sync only kicks in on the next audible
+          purchase — for the backlog, hit{" "}
+          <strong css={{ color: theme.colors.text.main }}>download all</strong>
+          {" "}or pick books individually.
+        </div>
+      )}
       <div
         css={{
           display: "flex",

@@ -85,22 +85,32 @@ when the owner profile's effective `auto_enqueue` is true. Manual
 
 ## First deploy
 
-When `SCRIBE_AUTO_ENQUEUE=1` (raspi default), the first time you link an
-Audible account every Active book gets queued in one batch: poller ticks
-→ incremental sync inserts books → `enqueue_pending` returns the lot.
+Linking an Audible account runs `sync::full` in the background and
+populates `books` for every Active title. **No jobs are auto-queued
+for the existing backlog** — the poller's incremental tick fires
+auto-enqueue only when it observes a *new* book purchase, and after
+the full sync `MAX(purchase_date)` already covers everything visible
+right now. Two choices for the backlog:
+
+- **"download all"** button on the library page — one confirm dialog,
+  queues every Active book that has no job row. Worker takes it from
+  there at the throttled pace below.
+- **Per-book download** — same code path, scoped to one ASIN.
+
+After that, any future Audible purchase triggers auto-enqueue on the
+next poll tick (provided `SCRIBE_AUTO_ENQUEUE=1`). When it fires it
+catches the new book *and* any older books still missing a job, so
+forgetting to "download all" on day one isn't terminal — buying
+anything new sweeps the backlog in.
+
 A 51 GB library is roughly 100–200 books; at the default inter-job
 floor (30–90 s jitter) and ~1–3 min per book, expect the backlog to
-trickle over **6–24 hours** before steady-state catches up. Worker
-concurrency stays at 1 so it never bursts.
-
-Don't fight it — let it run. Throughput is intentionally low so each
-voucher fetch + CDN download looks like a deliberate user action rather
-than a scraper window. If you need it faster on a private deploy
-behind a stable Amazon session, raise `SCRIBE_JOB_CONCURRENCY` and/or
-zero `SCRIBE_JOB_INTERJOB_DELAY_S`.
-
-Flip `SCRIBE_AUTO_ENQUEUE=0` if you want to review the library in the
-UI first and click "download all" (or per-book) explicitly.
+trickle over **6–24 hours**. Worker concurrency stays at 1 so it never
+bursts. Throughput is intentionally low so each voucher fetch + CDN
+download looks like a deliberate user action rather than a scraper
+window. Raise `SCRIBE_JOB_CONCURRENCY` and/or zero
+`SCRIBE_JOB_INTERJOB_DELAY_S` if you need it faster on a private
+deploy behind a stable Amazon session.
 
 ## Auth model
 
