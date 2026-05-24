@@ -1,4 +1,5 @@
 import { useTheme } from "@emotion/react";
+import { useEffect } from "react";
 import useSWR from "swr";
 
 import { api, ApiError } from "../api";
@@ -11,43 +12,27 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   });
   const theme = useTheme();
 
-  if (isLoading) return null;
-
   const unauthorized = error instanceof ApiError && error.status === 401;
 
-  if (unauthorized) {
-    return (
-      <div
-        css={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          marginTop: "20vh",
-          color: theme.colors.text.muted,
-        }}
-      >
-        <p>no books yet. sign in to begin.</p>
-        <a
-          href="/auth/login"
-          css={{
-            padding: "10px 20px",
-            background: theme.colors.activity.on,
-            color: "white",
-            borderRadius: theme.border.radius,
-            textDecoration: "none",
-            fontFamily: theme.fonts.heading,
-            fontWeight: 500,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          sign in
-        </a>
-      </div>
-    );
-  }
+  // Match chat: bounce straight to /auth/login on unauth landings so the
+  // user lands on the SSO page (or DEV_AUTH cookie set) without a
+  // mid-step "sign in" click. `next` preserves the deep link so OIDC
+  // returns the user to where they were heading.
+  useEffect(() => {
+    if (unauthorized) {
+      const next =
+        window.location.pathname +
+        window.location.search +
+        window.location.hash;
+      window.location.replace(`/auth/login?next=${encodeURIComponent(next)}`);
+    }
+  }, [unauthorized]);
 
-  if (error || !data) {
+  if (isLoading || unauthorized) return null;
+
+  const isBackendDown = error && !unauthorized;
+
+  if (isBackendDown || !data) {
     return (
       <div
         css={{

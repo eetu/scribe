@@ -102,6 +102,18 @@ fn write_cookie(jar: SignedCookieJar, sub: &str, email: &str) -> SignedCookieJar
 pub struct LoginQuery {
     username: Option<String>,
     email: Option<String>,
+    /// Path the SPA wants to return to after login. Sanitized — anything
+    /// not starting with `/` (or starting with `//` which would be a
+    /// schemeless external URL) is rejected so this can't be used as an
+    /// open-redirect.
+    next: Option<String>,
+}
+
+fn sanitize_next(next: Option<&str>) -> String {
+    match next {
+        Some(n) if n.starts_with('/') && !n.starts_with("//") => n.to_string(),
+        _ => "/".to_string(),
+    }
 }
 
 /// `GET /auth/login`
@@ -120,10 +132,11 @@ pub async fn login(
     }
     let user = q.username.unwrap_or_else(|| "dev".to_string());
     let email = q.email.unwrap_or_else(|| format!("{user}@local"));
+    let dest = sanitize_next(q.next.as_deref());
     // Ensure the profile exists before handing out a cookie so a 403 fires
     // here (closed registration) rather than on the next /api/me call.
     let _profile = profile::resolve_or_create(&state, &user, &email, None).await?;
-    Ok((write_cookie(jar, &user, &email), Redirect::to("/")).into_response())
+    Ok((write_cookie(jar, &user, &email), Redirect::to(&dest)).into_response())
 }
 
 /// `POST /auth/logout`
