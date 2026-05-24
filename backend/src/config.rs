@@ -18,6 +18,8 @@ pub struct Config {
     pub poll_active_hour_end: u32,
     pub job_concurrency: usize,
     pub job_retry_max: u32,
+    pub job_interjob_delay_s: u64,
+    pub job_interjob_jitter_percent: u32,
     pub auto_enqueue_new: bool,
     pub naming: crate::filenaming::Templates,
     pub open_registration: bool,
@@ -71,6 +73,14 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(3),
+            job_interjob_delay_s: env::var("SCRIBE_JOB_INTERJOB_DELAY_S")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(60),
+            job_interjob_jitter_percent: env::var("SCRIBE_JOB_INTERJOB_JITTER_PERCENT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50),
             auto_enqueue_new: env::var("SCRIBE_AUTO_ENQUEUE")
                 .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),

@@ -83,6 +83,25 @@ Each tick: for each account, GET shim
 when the owner profile's effective `auto_enqueue` is true. Manual
 `/api/library/sync` does a full paginated walk and bypasses the timer.
 
+## First deploy
+
+When `SCRIBE_AUTO_ENQUEUE=1` (raspi default), the first time you link an
+Audible account every Active book gets queued in one batch: poller ticks
+→ incremental sync inserts books → `enqueue_pending` returns the lot.
+A 51 GB library is roughly 100–200 books; at the default inter-job
+floor (30–90 s jitter) and ~1–3 min per book, expect the backlog to
+trickle over **6–24 hours** before steady-state catches up. Worker
+concurrency stays at 1 so it never bursts.
+
+Don't fight it — let it run. Throughput is intentionally low so each
+voucher fetch + CDN download looks like a deliberate user action rather
+than a scraper window. If you need it faster on a private deploy
+behind a stable Amazon session, raise `SCRIBE_JOB_CONCURRENCY` and/or
+zero `SCRIBE_JOB_INTERJOB_DELAY_S`.
+
+Flip `SCRIBE_AUTO_ENQUEUE=0` if you want to review the library in the
+UI first and click "download all" (or per-book) explicitly.
+
 ## Environment
 
 | Var | Default | Purpose |
@@ -104,7 +123,9 @@ when the owner profile's effective `auto_enqueue` is true. Manual
 | `SCRIBE_FILENAME_TEMPLATE_ORIGINAL` | `{author?}/{series_title?}/{title}-{asin}.aaxc` | original-file path template |
 | `SCRIBE_JOB_CONCURRENCY` | `1` | parallel ffmpeg jobs (raise on mini, leave at 1 on Pi) |
 | `SCRIBE_JOB_RETRY_MAX` | `3` | transient-failure retry cap |
-| `SCRIBE_AUTO_ENQUEUE` | `0` | poller auto-queues new books on discovery; `0` = manual download only (default), `1` = production auto-sync |
+| `SCRIBE_AUTO_ENQUEUE` | `0` | poller auto-queues new books on discovery; `0` = manual download only (default), `1` = production auto-sync. Cold-start with `1`: see "First deploy" below — every book in the linked accounts gets queued. |
+| `SCRIBE_JOB_INTERJOB_DELAY_S` | `60` | seconds the worker sleeps between jobs (mid-window inter-job pacing) |
+| `SCRIBE_JOB_INTERJOB_JITTER_PERCENT` | `50` | uniform ± randomness on each inter-job sleep |
 | `SESSION_KEY` | _ephemeral_ | 64-byte hex |
 | `DEV_AUTH` | `0` | dev login fallback |
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URL` | unset | kanidm config |

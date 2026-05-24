@@ -111,6 +111,20 @@ impl Queue {
                     if let Err(e) = inner.run_job(job_id).await {
                         tracing::error!(%job_id, error = ?e, "worker errored");
                     }
+                    // Inter-job sleep to space out voucher fetches + CDN
+                    // downloads. Makes a 200-book first-deploy backlog look
+                    // closer to a human pace than a scraper burst.
+                    let base = inner.state.cfg.job_interjob_delay_s;
+                    if base > 0 {
+                        let jitter_pct = inner.state.cfg.job_interjob_jitter_percent.min(95) as f64 / 100.0;
+                        let factor = {
+                            use rand::Rng;
+                            1.0 + rand::rng().random_range(-jitter_pct..=jitter_pct)
+                        };
+                        let secs = ((base as f64) * factor).max(1.0) as u64;
+                        tracing::debug!(worker_id, sleep_s = secs, "inter-job pacing");
+                        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+                    }
                 }
             });
         }
