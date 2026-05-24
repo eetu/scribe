@@ -94,12 +94,13 @@ impl<'a> PressClient<'a> {
         let Some(url) = &self.state.cfg.press_url else {
             return Ok(false);
         };
-        // Send bearer — press itself exempts /health from auth, but a Caddy
-        // (or other reverse proxy) sitting in front may gate every path on
-        // the bearer. Probe carries the same Authorization scribe uses for
-        // real job calls, so "healthy" here matches "we can do work".
+        // /health is anonymous by convention. Press exempts it from its
+        // own bearer guard, and any reverse proxy in front of press is
+        // expected to do the same (see mini/tasks/caddy.py site_block).
         let r = self
-            .auth(self.state.http.get(format!("{}/health", url.trim_end_matches('/'))))
+            .state
+            .http
+            .get(format!("{}/health", url.trim_end_matches('/')))
             .send()
             .await;
         Ok(matches!(r, Ok(resp) if resp.status().is_success()))
