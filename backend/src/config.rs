@@ -17,6 +17,8 @@ pub struct Config {
     pub job_retry_max: u32,
     pub auto_enqueue_new: bool,
     pub naming: crate::filenaming::Templates,
+    pub open_registration: bool,
+    pub admin_email: Option<String>,
     pub abs_url: Option<String>,
     pub abs_token: Option<String>,
     pub abs_library_id: Option<String>,
@@ -58,6 +60,10 @@ impl Config {
                 .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             naming: crate::filenaming::Templates::from_env(),
+            open_registration: env::var("SCRIBE_OPEN_REGISTRATION")
+                .map(|s| s != "0")
+                .unwrap_or(true),
+            admin_email: env::var("SCRIBE_ADMIN_EMAIL").ok(),
             abs_url: env::var("ABS_URL").ok(),
             abs_token: env::var("ABS_TOKEN").ok(),
             abs_library_id: env::var("ABS_LIBRARY_ID").ok(),

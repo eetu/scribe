@@ -165,33 +165,32 @@ async fn upsert(state: &AppState, account_id: &str, book: &LibraryBook) -> Resul
 }
 
 /// Insert (or refresh) an account row that shim already owns.
-/// Called from login_finish — links the shim account to the user_sub
-/// currently logged in via OIDC/dev cookie.
+/// Called from login_finish — links the shim account to the profile
+/// currently signed in via OIDC/dev cookie.
 pub async fn register_account(
     state: &AppState,
     account_id: &str,
     locale: &str,
     email_masked: &str,
     customer_name: Option<&str>,
-    user_sub: &str,
+    profile_id: i64,
 ) -> Result<(), AppError> {
     let aid = account_id.to_string();
     let loc = locale.to_string();
     let em = email_masked.to_string();
     let cn = customer_name.map(|s| s.to_string());
-    let us = user_sub.to_string();
     state
         .db
         .with(move |c| {
             c.execute(
-                "INSERT INTO accounts (id, locale, email_masked, customer_name, user_sub)
+                "INSERT INTO accounts (id, locale, email_masked, customer_name, profile_id)
                  VALUES (?1,?2,?3,?4,?5)
                  ON CONFLICT(id) DO UPDATE SET
                    locale = excluded.locale,
                    email_masked = excluded.email_masked,
                    customer_name = excluded.customer_name,
-                   user_sub = excluded.user_sub",
-                rusqlite::params![aid, loc, em, cn, us],
+                   profile_id = excluded.profile_id",
+                rusqlite::params![aid, loc, em, cn, profile_id],
             )?;
             Ok(())
         })

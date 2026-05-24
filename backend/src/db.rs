@@ -15,6 +15,11 @@ pub struct Db {
     inner: Arc<Mutex<Connection>>,
 }
 
+/// Current schema version. Bump + add a migration block when shipping
+/// a schema change to a deployed instance. Anything from `0` is a fresh
+/// install and runs the full `SCHEMA` batch.
+const SCHEMA_VERSION: i64 = 1;
+
 impl Db {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
@@ -33,24 +38,44 @@ impl Db {
     }
 
     fn migrate(conn: &Connection) -> anyhow::Result<()> {
-        conn.execute_batch(SCHEMA_V1)?;
+        let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if current < 1 {
+            conn.execute_batch(SCHEMA)?;
+        }
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
 }
 
-const SCHEMA_V1: &str = r#"
-CREATE TABLE IF NOT EXISTS accounts (
+const SCHEMA: &str = r#"
+CREATE TABLE profile (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_sub TEXT UNIQUE,
+  email TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL DEFAULT 'user',
+  display_name TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_profile_sub ON profile(user_sub);
+
+CREATE TABLE profile_settings (
+  profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (profile_id, key)
+);
+
+CREATE TABLE accounts (
   id TEXT PRIMARY KEY,
+  profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
   locale TEXT NOT NULL,
   email_masked TEXT NOT NULL,
   customer_name TEXT,
-  last_synced_at INTEGER,
-  user_sub TEXT NOT NULL
+  last_synced_at INTEGER
 );
+CREATE INDEX idx_accounts_profile ON accounts(profile_id);
 
-CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_sub);
-
-CREATE TABLE IF NOT EXISTS books (
+CREATE TABLE books (
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -66,11 +91,10 @@ CREATE TABLE IF NOT EXISTS books (
   first_seen_at INTEGER NOT NULL,
   PRIMARY KEY (asin, account_id)
 );
+CREATE INDEX idx_books_account ON books(account_id);
+CREATE INDEX idx_books_purchase ON books(purchase_date);
 
-CREATE INDEX IF NOT EXISTS idx_books_account ON books(account_id);
-CREATE INDEX IF NOT EXISTS idx_books_purchase ON books(purchase_date);
-
-CREATE TABLE IF NOT EXISTS jobs (
+CREATE TABLE jobs (
   id TEXT PRIMARY KEY,
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL,
@@ -81,7 +105,6 @@ CREATE TABLE IF NOT EXISTS jobs (
   m4b_path TEXT,
   aaxc_path TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-CREATE INDEX IF NOT EXISTS idx_jobs_account ON jobs(account_id);
+CREATE INDEX idx_jobs_status ON jobs(status);
+CREATE INDEX idx_jobs_account ON jobs(account_id);
 "#;

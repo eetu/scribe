@@ -1,15 +1,16 @@
-//! Session-based auth.
+//! Session-based auth + profile resolution.
 //!
 //! Two modes:
-//!   * `DEV_AUTH=1` — `GET /auth/login?username=dev` writes a signed cookie
-//!     directly. No OIDC. For local dev.
+//!   * `DEV_AUTH=1` — `GET /auth/login?username=dev[&email=foo@bar]` writes
+//!     a signed cookie directly. No OIDC. For local dev.
 //!   * OIDC kanidm — `GET /auth/login` redirects to issuer, `/auth/callback`
 //!     validates and writes the cookie. (Wiring lives in oidc.rs; this MVP
 //!     stubs it until `OIDC_ISSUER` is populated.)
 //!
-//! Both produce the same downstream session: a signed cookie named
-//! `scribe_session` containing the user's `sub` claim. All `/api/*` extractors
-//! demand it.
+//! Cookie payload: `sub|email` (pipe-separated). The `AuthProfile`
+//! extractor resolves both fields, walks the profile table via the
+//! v2 link chain (sub match → email match → auto-create), and exposes
+//! a populated `Profile` to handlers.
 
 use axum::extract::{FromRef, FromRequestParts, Query, State};
 use axum::http::request::Parts;
@@ -19,15 +20,14 @@ use axum_extra::extract::cookie::{Cookie, Key, SameSite, SignedCookieJar};
 use serde::Deserialize;
 
 use crate::error::AppError;
+use crate::profile::{self, Profile};
 use crate::state::AppState;
 
 const COOKIE_NAME: &str = "scribe_session";
 
-/// Bytes extracted from the SESSION_KEY env. 32-byte minimum for signing.
+/// Bytes extracted from the SESSION_KEY env. 64-byte minimum for signing.
 pub fn cookie_key(hex: &str) -> Key {
     let bytes = hex::decode(hex).unwrap_or_else(|_| {
-        // Fall back to a hash of the input if it isn't valid hex.
-        // 64 bytes required by axum-extra for signed cookies.
         let mut padded = [0u8; 64];
         for (i, b) in hex.as_bytes().iter().enumerate().take(64) {
             padded[i] = *b;
@@ -37,7 +37,6 @@ pub fn cookie_key(hex: &str) -> Key {
     if bytes.len() >= 64 {
         Key::from(&bytes[..64])
     } else {
-        // axum-extra requires 64+ bytes for the master key.
         let mut padded = [0u8; 64];
         for (i, b) in bytes.iter().enumerate().take(64) {
             padded[i] = *b;
@@ -47,11 +46,20 @@ pub fn cookie_key(hex: &str) -> Key {
 }
 
 #[derive(Debug, Clone)]
-pub struct AuthUser {
-    pub sub: String,
+pub struct AuthProfile {
+    pub profile: Profile,
 }
 
-impl<S> FromRequestParts<S> for AuthUser
+impl AuthProfile {
+    pub fn id(&self) -> i64 {
+        self.profile.id
+    }
+    pub fn sub(&self) -> &str {
+        self.profile.user_sub.as_deref().unwrap_or("")
+    }
+}
+
+impl<S> FromRequestParts<S> for AuthProfile
 where
     AppState: axum::extract::FromRef<S>,
     S: Send + Sync,
@@ -61,20 +69,39 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = AppState::from_ref(state);
         let jar = SignedCookieJar::from_headers(&parts.headers, app_state.cookie_key.clone());
-        let sub = jar
+        let raw = jar
             .get(COOKIE_NAME)
             .map(|c| c.value().to_string())
             .ok_or(AppError::Unauthorized)?;
-        if sub.is_empty() {
-            return Err(AppError::Unauthorized);
-        }
-        Ok(AuthUser { sub })
+        let (sub, email) = parse_cookie(&raw).ok_or(AppError::Unauthorized)?;
+        let profile = profile::resolve_or_create(&app_state, sub, email, None).await?;
+        Ok(AuthProfile { profile })
     }
+}
+
+fn parse_cookie(raw: &str) -> Option<(&str, &str)> {
+    let (sub, email) = raw.split_once('|')?;
+    if sub.is_empty() || email.is_empty() {
+        return None;
+    }
+    Some((sub, email))
+}
+
+fn write_cookie(jar: SignedCookieJar, sub: &str, email: &str) -> SignedCookieJar {
+    let value = format!("{sub}|{email}");
+    let cookie = Cookie::build((COOKIE_NAME, value))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(false)
+        .build();
+    jar.add(cookie)
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LoginQuery {
     username: Option<String>,
+    email: Option<String>,
 }
 
 /// `GET /auth/login`
@@ -92,13 +119,11 @@ pub async fn login(
         ));
     }
     let user = q.username.unwrap_or_else(|| "dev".to_string());
-    let cookie = Cookie::build((COOKIE_NAME, user))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .secure(false)
-        .build();
-    Ok((jar.add(cookie), Redirect::to("/")).into_response())
+    let email = q.email.unwrap_or_else(|| format!("{user}@local"));
+    // Ensure the profile exists before handing out a cookie so a 403 fires
+    // here (closed registration) rather than on the next /api/me call.
+    let _profile = profile::resolve_or_create(&state, &user, &email, None).await?;
+    Ok((write_cookie(jar, &user, &email), Redirect::to("/")).into_response())
 }
 
 /// `POST /auth/logout`

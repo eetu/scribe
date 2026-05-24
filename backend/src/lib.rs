@@ -6,6 +6,7 @@ pub mod filenaming;
 pub mod pipeline;
 pub mod poller;
 pub mod press;
+pub mod profile;
 pub mod queue;
 pub mod routes;
 pub mod shim;

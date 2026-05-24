@@ -6,13 +6,28 @@ export type Status = {
   press_url: string | null;
   press_healthy: boolean;
   dev_auth: boolean;
-  auto_enqueue: boolean;
+  open_registration: boolean;
+  auto_enqueue_default: boolean;
   library_dir: string;
   original_dir: string;
-  poll_interval_min: number;
+  poll_interval_min_default: number;
 };
 
-export type Me = { sub: string };
+export type Me = {
+  sub: string;
+  profile_id: number;
+  email: string;
+  role: "admin" | "user";
+  display_name: string | null;
+};
+
+export type SettingEntry = {
+  value: string;
+  env_default: string;
+  overridden: boolean;
+};
+
+export type Settings = Record<string, SettingEntry>;
 
 export type Account = {
   account_id: string;
@@ -129,4 +144,14 @@ export const api = {
   cancelJob: (id: string) =>
     req<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
+  settings: () => req<Settings>("/api/settings"),
+  patchSettings: (body: Record<string, string>) =>
+    req<{ ok: boolean }>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  resetSetting: (key: string) =>
+    req<{ ok: boolean }>(`/api/settings/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    }),
 };

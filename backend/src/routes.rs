@@ -1,5 +1,5 @@
 use axum::extract::{Path, State};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -10,9 +10,10 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
-use crate::auth::AuthUser;
+use crate::auth::AuthProfile;
 use crate::error::{AppError, AppResult};
 use crate::press::PressClient;
+use crate::profile;
 use crate::queue::QueueEvent;
 use crate::shim::{LoginFinishReq, LoginStartReq, ShimClient};
 use crate::state::AppState;
@@ -25,6 +26,8 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", get(a::login))
         .route("/auth/logout", post(a::logout))
         .route("/api/me", get(me))
+        .route("/api/settings", get(get_settings).patch(patch_settings))
+        .route("/api/settings/{key}", delete(reset_setting))
         .route("/api/accounts", get(list_accounts))
         .route("/api/accounts/login/start", post(login_start))
         .route("/api/accounts/login/finish", post(login_finish))
@@ -36,8 +39,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
-        .route("/api/reorg/preview", get(reorg_preview))
-        .route("/api/reorg/commit", post(reorg_commit))
         .with_state(state)
 }
 
@@ -57,27 +58,96 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
         "press_url": state.cfg.press_url,
         "press_healthy": press_health,
         "dev_auth": state.cfg.dev_auth,
-        "auto_enqueue": state.cfg.auto_enqueue_new,
+        "open_registration": state.cfg.open_registration,
+        "auto_enqueue_default": state.cfg.auto_enqueue_new,
         "library_dir": state.cfg.library_dir,
         "original_dir": state.cfg.original_dir,
-        "poll_interval_min": state.cfg.poll_interval_min,
+        "poll_interval_min_default": state.cfg.poll_interval_min,
     }))
 }
 
 // ---------- session probe ----------
 
-async fn me(user: AuthUser) -> Json<Value> {
-    Json(json!({ "sub": user.sub }))
+async fn me(user: AuthProfile) -> Json<Value> {
+    Json(json!({
+        "sub": user.sub(),
+        "profile_id": user.id(),
+        "email": user.profile.email,
+        "role": user.profile.role,
+        "display_name": user.profile.display_name,
+    }))
+}
+
+// ---------- per-profile settings ----------
+//
+// Effective value resolution: profile override (DB) overrides env default.
+// Keys exposed here are the user-tunable subset; library/original/template
+// stay env-only for now — flipping those at runtime breaks already-written
+// paths so they need migration handling first.
+
+const USER_TUNABLE_KEYS: &[&str] = &["auto_enqueue", "poll_interval_min"];
+
+async fn get_settings(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
+    let overrides = profile::all_settings(&state, user.id()).await?;
+    let overrides_map: std::collections::HashMap<_, _> = overrides.into_iter().collect();
+    let mut out = serde_json::Map::new();
+    for key in USER_TUNABLE_KEYS {
+        let env_default = env_default_for(&state, key);
+        let effective = overrides_map.get(*key).cloned().unwrap_or_else(|| env_default.clone());
+        out.insert(
+            (*key).into(),
+            json!({
+                "value": effective,
+                "env_default": env_default,
+                "overridden": overrides_map.contains_key(*key),
+            }),
+        );
+    }
+    Ok(Json(Value::Object(out)))
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchSettingsIn(std::collections::HashMap<String, String>);
+
+async fn patch_settings(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Json(body): Json<PatchSettingsIn>,
+) -> AppResult<Json<Value>> {
+    for (k, v) in &body.0 {
+        if !USER_TUNABLE_KEYS.contains(&k.as_str()) {
+            return Err(AppError::BadRequest(format!("unknown setting key: {k}")));
+        }
+        profile::set_setting(&state, user.id(), k, v).await?;
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn reset_setting(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> AppResult<Json<Value>> {
+    if !USER_TUNABLE_KEYS.contains(&key.as_str()) {
+        return Err(AppError::BadRequest(format!("unknown setting key: {key}")));
+    }
+    profile::delete_setting(&state, user.id(), &key).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+fn env_default_for(state: &AppState, key: &str) -> String {
+    match key {
+        "auto_enqueue" => state.cfg.auto_enqueue_new.to_string(),
+        "poll_interval_min" => state.cfg.poll_interval_min.to_string(),
+        _ => String::new(),
+    }
 }
 
 // ---------- accounts (proxy to shim) ----------
 
-async fn list_accounts(user: AuthUser, State(state): State<AppState>) -> AppResult<Json<Value>> {
+async fn list_accounts(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
     let summaries = ShimClient::new(&state).list_accounts().await?;
-    // Enrich each shim account with our local DB facts: last_synced_at,
-    // book_count, active_jobs. Only accounts owned by the caller's user_sub
-    // make it through.
-    let sub = user.sub.clone();
+    let pid = user.id();
     let local: std::collections::HashMap<String, (Option<i64>, i64, i64)> = state
         .db
         .with(move |c| {
@@ -89,9 +159,9 @@ async fn list_accounts(user: AuthUser, State(state): State<AppState>) -> AppResu
                           WHERE j.account_id = a.id
                             AND j.status NOT IN ('done','failed','cancelled'))
                  FROM accounts a
-                 WHERE a.user_sub = ?1",
+                 WHERE a.profile_id = ?1",
             )?;
-            let rows = stmt.query_map([sub], |r| {
+            let rows = stmt.query_map([pid], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, Option<i64>>(1)?,
@@ -132,7 +202,7 @@ struct LoginStartIn {
 }
 
 async fn login_start(
-    _user: AuthUser,
+    _user: AuthProfile,
     State(state): State<AppState>,
     Json(body): Json<LoginStartIn>,
 ) -> AppResult<Json<Value>> {
@@ -152,11 +222,11 @@ struct LoginFinishIn {
 }
 
 async fn refresh_account(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    assert_owns_account(&state, &user.sub, &id).await?;
+    assert_owns_account(&state, user.id(), &id).await?;
     let r = state
         .http
         .post(format!("{}/accounts/{}/refresh", state.cfg.shim_url.trim_end_matches('/'), id))
@@ -169,11 +239,11 @@ async fn refresh_account(
 }
 
 async fn deregister_account(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    assert_owns_account(&state, &user.sub, &id).await?;
+    assert_owns_account(&state, user.id(), &id).await?;
     let r = state
         .http
         .post(format!(
@@ -186,7 +256,6 @@ async fn deregister_account(
         .error_for_status()?
         .json::<Value>()
         .await?;
-    // Local accounts row + cascaded books cleared.
     let id_s = id.clone();
     state
         .db
@@ -199,7 +268,7 @@ async fn deregister_account(
 }
 
 async fn login_finish(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Json(body): Json<LoginFinishIn>,
 ) -> AppResult<Json<Value>> {
@@ -209,9 +278,6 @@ async fn login_finish(
             redirect_url: &body.redirect_url,
         })
         .await?;
-    // Look up the email-masked / customer_name the shim now knows about so
-    // we can stash a complete row instead of NULLs that need a follow-up
-    // /api/accounts fetch to populate.
     let summary = ShimClient::new(&state)
         .list_accounts()
         .await?
@@ -223,11 +289,10 @@ async fn login_finish(
         resp.locale.as_deref().unwrap_or(""),
         summary.as_ref().map(|s| s.email_masked.as_str()).unwrap_or(""),
         resp.customer_name.as_deref(),
-        &user.sub,
+        user.id(),
     )
     .await?;
 
-    // Kick a full sync on register — first-time users get an immediate library.
     let state_clone = state.clone();
     let aid = resp.account_id.clone();
     tokio::spawn(async move {
@@ -241,10 +306,8 @@ async fn login_finish(
 
 // ---------- library + jobs (DB-backed) ----------
 
-async fn list_library(
-    user: AuthUser,
-    State(state): State<AppState>,
-) -> AppResult<Json<Value>> {
+async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
+    let pid = user.id();
     let rows = state
         .db
         .with(move |c| {
@@ -252,11 +315,11 @@ async fn list_library(
                 "SELECT b.asin, b.account_id, b.title, b.authors_json, b.cover_url, b.status, b.purchase_date
                  FROM books b
                  JOIN accounts a ON a.id = b.account_id
-                 WHERE a.user_sub = ?1
+                 WHERE a.profile_id = ?1
                  ORDER BY b.purchase_date DESC",
             )?;
             let rows = stmt
-                .query_map([user.sub.as_str()], |r| {
+                .query_map([pid], |r| {
                     Ok(json!({
                         "asin": r.get::<_, String>(0)?,
                         "account_id": r.get::<_, String>(1)?,
@@ -283,41 +346,23 @@ struct SyncIn {
 }
 
 async fn sync_library(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Json(body): Json<SyncIn>,
 ) -> AppResult<Json<Value>> {
     let accounts = match body.account_id {
         Some(id) => {
-            // Verify the caller owns this account.
-            let owned = state
-                .db
-                .with({
-                    let id = id.clone();
-                    let sub = user.sub.clone();
-                    move |c| {
-                        let n: i64 = c.query_row(
-                            "SELECT COUNT(*) FROM accounts WHERE id = ?1 AND user_sub = ?2",
-                            rusqlite::params![id, sub],
-                            |r| r.get(0),
-                        )?;
-                        Ok(n)
-                    }
-                })
-                .await?;
-            if owned == 0 {
-                return Err(AppError::NotFound);
-            }
+            assert_owns_account(&state, user.id(), &id).await?;
             vec![id]
         }
         None => state
             .db
             .with({
-                let sub = user.sub.clone();
+                let pid = user.id();
                 move |c| {
-                    let mut stmt = c.prepare("SELECT id FROM accounts WHERE user_sub = ?1")?;
+                    let mut stmt = c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
                     let v = stmt
-                        .query_map([sub], |r| r.get::<_, String>(0))?
+                        .query_map([pid], |r| r.get::<_, String>(0))?
                         .collect::<rusqlite::Result<Vec<_>>>()?;
                     Ok(v)
                 }
@@ -337,7 +382,8 @@ async fn sync_library(
     Ok(Json(json!({ "syncs": reports })))
 }
 
-async fn list_jobs(user: AuthUser, State(state): State<AppState>) -> AppResult<Json<Value>> {
+async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
+    let pid = user.id();
     let rows = state
         .db
         .with(move |c| {
@@ -345,11 +391,11 @@ async fn list_jobs(user: AuthUser, State(state): State<AppState>) -> AppResult<J
                 "SELECT j.id, j.asin, j.account_id, j.status, j.created_at, j.updated_at, j.error
                  FROM jobs j
                  JOIN accounts a ON a.id = j.account_id
-                 WHERE a.user_sub = ?1
+                 WHERE a.profile_id = ?1
                  ORDER BY j.updated_at DESC LIMIT 200",
             )?;
             let rows = stmt
-                .query_map([user.sub.as_str()], |r| {
+                .query_map([pid], |r| {
                     Ok(json!({
                         "id": r.get::<_, String>(0)?,
                         "asin": r.get::<_, String>(1)?,
@@ -374,11 +420,11 @@ struct EnqueueIn {
 }
 
 async fn enqueue_job(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Json(body): Json<EnqueueIn>,
 ) -> AppResult<Json<Value>> {
-    assert_owns_account(&state, &user.sub, &body.account_id).await?;
+    assert_owns_account(&state, user.id(), &body.account_id).await?;
     let id = state.queue().enqueue(&body.account_id, &body.asin).await?;
     Ok(Json(json!({ "job_id": id })))
 }
@@ -390,23 +436,23 @@ struct EnqueueAllIn {
 }
 
 async fn enqueue_all(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Json(body): Json<EnqueueAllIn>,
 ) -> AppResult<Json<Value>> {
     let accounts: Vec<String> = match body.account_id {
         Some(id) => {
-            assert_owns_account(&state, &user.sub, &id).await?;
+            assert_owns_account(&state, user.id(), &id).await?;
             vec![id]
         }
         None => state
             .db
             .with({
-                let sub = user.sub.clone();
+                let pid = user.id();
                 move |c| {
-                    let mut stmt = c.prepare("SELECT id FROM accounts WHERE user_sub = ?1")?;
+                    let mut stmt = c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
                     let v = stmt
-                        .query_map([sub], |r| r.get::<_, String>(0))?
+                        .query_map([pid], |r| r.get::<_, String>(0))?
                         .collect::<rusqlite::Result<Vec<_>>>()?;
                     Ok(v)
                 }
@@ -424,12 +470,12 @@ async fn enqueue_all(
 }
 
 async fn job_sse(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, AppError> {
     let job_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("invalid uuid".into()))?;
-    assert_owns_job(&state, &user.sub, job_id).await?;
+    assert_owns_job(&state, user.id(), job_id).await?;
     let rx = state.queue().subscribe(job_id).await.ok_or(AppError::NotFound)?;
     let stream = BroadcastStream::new(rx).filter_map(|res| {
         res.ok().and_then(|ev: QueueEvent| {
@@ -440,25 +486,24 @@ async fn job_sse(
 }
 
 async fn cancel_job(
-    user: AuthUser,
+    user: AuthProfile,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let job_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("invalid uuid".into()))?;
-    assert_owns_job(&state, &user.sub, job_id).await?;
+    assert_owns_job(&state, user.id(), job_id).await?;
     let cancelled = state.queue().cancel(job_id).await?;
     Ok(Json(json!({ "cancelled": cancelled })))
 }
 
-async fn assert_owns_account(state: &AppState, user_sub: &str, account_id: &str) -> AppResult<()> {
-    let sub = user_sub.to_string();
+async fn assert_owns_account(state: &AppState, profile_id: i64, account_id: &str) -> AppResult<()> {
     let aid = account_id.to_string();
     let n: i64 = state
         .db
         .with(move |c| {
             c.query_row(
-                "SELECT COUNT(*) FROM accounts WHERE id = ?1 AND user_sub = ?2",
-                rusqlite::params![aid, sub],
+                "SELECT COUNT(*) FROM accounts WHERE id = ?1 AND profile_id = ?2",
+                rusqlite::params![aid, profile_id],
                 |r| r.get(0),
             )
         })
@@ -469,16 +514,15 @@ async fn assert_owns_account(state: &AppState, user_sub: &str, account_id: &str)
     Ok(())
 }
 
-async fn assert_owns_job(state: &AppState, user_sub: &str, job_id: Uuid) -> AppResult<()> {
-    let sub = user_sub.to_string();
+async fn assert_owns_job(state: &AppState, profile_id: i64, job_id: Uuid) -> AppResult<()> {
     let jid = job_id.to_string();
     let n: i64 = state
         .db
         .with(move |c| {
             c.query_row(
                 "SELECT COUNT(*) FROM jobs j JOIN accounts a ON a.id = j.account_id
-                 WHERE j.id = ?1 AND a.user_sub = ?2",
-                rusqlite::params![jid, sub],
+                 WHERE j.id = ?1 AND a.profile_id = ?2",
+                rusqlite::params![jid, profile_id],
                 |r| r.get(0),
             )
         })
@@ -487,12 +531,4 @@ async fn assert_owns_job(state: &AppState, user_sub: &str, job_id: Uuid) -> AppR
         return Err(AppError::NotFound);
     }
     Ok(())
-}
-
-async fn reorg_preview(_user: AuthUser) -> AppResult<Json<Value>> {
-    Err(AppError::BadRequest("reorg lands in task #10".into()))
-}
-
-async fn reorg_commit(_user: AuthUser) -> AppResult<Json<Value>> {
-    Err(AppError::BadRequest("reorg lands in task #10".into()))
 }
