@@ -99,12 +99,26 @@ pub async fn run(
     // edition, etc.), suffix the new file with " (asin)" so both survive on
     // disk. Re-downloads of the same ASIN overwrite in place.
     let m4b_path = resolve_unique_m4b_path(canonical_m4b, &input.asin, &aaxc_path).await;
+    // Streaming the artifacts off press is the slowest non-press phase
+    // (~300 MB for a normal book over a Pi-side network mount). Pipe
+    // Progress events through so the UI doesn't sit on the last
+    // "converting" sample for minutes and the chip flips to "streaming".
     let aaxc_bytes = press
-        .stream_to_file(press_job_id, Artifact::Aaxc, &aaxc_path)
+        .stream_to_file(
+            press_job_id,
+            Artifact::Aaxc,
+            &aaxc_path,
+            progress_tx.as_ref().map(|tx| (tx, "streaming")),
+        )
         .await?;
     tracing::info!(%press_job_id, %aaxc_bytes, path = %aaxc_path.display(), "AAXC written");
     let m4b_bytes = press
-        .stream_to_file(press_job_id, Artifact::M4b, &m4b_path)
+        .stream_to_file(
+            press_job_id,
+            Artifact::M4b,
+            &m4b_path,
+            progress_tx.as_ref().map(|tx| (tx, "streaming")),
+        )
         .await?;
     tracing::info!(%press_job_id, %m4b_bytes, path = %m4b_path.display(), "M4B written");
 

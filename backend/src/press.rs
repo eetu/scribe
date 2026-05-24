@@ -11,7 +11,6 @@ use futures_util::TryStreamExt;
 use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
-use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -132,7 +131,16 @@ impl<'a> PressClient<'a> {
             .await?)
     }
 
-    pub async fn stream_to_file(&self, job_id: Uuid, artifact: Artifact, dest: &Path) -> Result<u64, AppError> {
+    /// Stream an artifact from press into `dest`. When a progress sender +
+    /// phase label are provided, fans out `Progress` events as bytes land
+    /// so the UI doesn't go silent during the multi-minute LAN copy.
+    pub async fn stream_to_file(
+        &self,
+        job_id: Uuid,
+        artifact: Artifact,
+        dest: &Path,
+        progress: Option<(&tokio::sync::broadcast::Sender<crate::queue::QueueEvent>, &str)>,
+    ) -> Result<u64, AppError> {
         let url = format!(
             "{}/jobs/{}/{}",
             self.base()?.trim_end_matches('/'),
@@ -144,6 +152,7 @@ impl<'a> PressClient<'a> {
             .send()
             .await?
             .error_for_status()?;
+        let total = resp.content_length();
 
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent)
@@ -154,16 +163,49 @@ impl<'a> PressClient<'a> {
         let mut file = tokio::fs::File::create(dest)
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
-        let stream = resp
-            .bytes_stream()
-            .map_err(std::io::Error::other);
-        let mut reader = StreamReader::new(stream);
-        let bytes = tokio::io::copy(&mut reader, &mut file)
+        let mut stream = resp.bytes_stream();
+        let mut bytes: u64 = 0;
+        // Throttle Progress emission to ~once per 500ms — the SSE consumer
+        // doesn't need finer than that and unbounded broadcast traffic
+        // would spam the channel for fast LAN copies.
+        let mut last_emit = std::time::Instant::now();
+        if let Some((tx, phase)) = progress {
+            let _ = tx.send(crate::queue::QueueEvent::Progress {
+                phase: phase.to_string(),
+                bytes_done: 0,
+                bytes_total: total,
+            });
+        }
+        while let Some(chunk) = stream
+            .try_next()
             .await
-            .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+            .map_err(|e| AppError::Upstream(e.to_string()))?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+            bytes += chunk.len() as u64;
+            if let Some((tx, phase)) = progress {
+                if last_emit.elapsed() >= std::time::Duration::from_millis(500) {
+                    last_emit = std::time::Instant::now();
+                    let _ = tx.send(crate::queue::QueueEvent::Progress {
+                        phase: phase.to_string(),
+                        bytes_done: bytes,
+                        bytes_total: total,
+                    });
+                }
+            }
+        }
         file.flush()
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+        if let Some((tx, phase)) = progress {
+            let _ = tx.send(crate::queue::QueueEvent::Progress {
+                phase: phase.to_string(),
+                bytes_done: bytes,
+                bytes_total: total,
+            });
+        }
         Ok(bytes)
     }
 

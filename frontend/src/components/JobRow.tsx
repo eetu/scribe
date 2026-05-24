@@ -14,7 +14,7 @@ const ACTIVE_PHASES = new Set([
   "fetching_voucher",
   "downloading",
   "converting",
-  "writing_nas",
+  "streaming",
 ]);
 
 const PHASE_ORDER = [
@@ -22,7 +22,7 @@ const PHASE_ORDER = [
   "fetching_voucher",
   "downloading",
   "converting",
-  "writing_nas",
+  "streaming",
 ];
 
 export default function JobRow({ job, book, onCancel }: Props) {

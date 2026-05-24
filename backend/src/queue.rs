@@ -3,7 +3,7 @@
 //! Lifecycle:
 //!
 //! ```text
-//! queued -> fetching_voucher -> downloading -> converting -> writing_nas -> done
+//! queued -> fetching_voucher -> downloading -> converting -> streaming -> done
 //!                                                                           \-> failed
 //!                                                                           \-> cancelled
 //! ```
@@ -43,7 +43,7 @@ pub enum Lifecycle {
     FetchingVoucher,
     Downloading,
     Converting,
-    WritingNas,
+    Streaming,
     Done,
     Failed,
     Cancelled,
@@ -56,7 +56,7 @@ impl Lifecycle {
             Lifecycle::FetchingVoucher => "fetching_voucher",
             Lifecycle::Downloading => "downloading",
             Lifecycle::Converting => "converting",
-            Lifecycle::WritingNas => "writing_nas",
+            Lifecycle::Streaming => "streaming",
             Lifecycle::Done => "done",
             Lifecycle::Failed => "failed",
             Lifecycle::Cancelled => "cancelled",
@@ -429,7 +429,7 @@ impl Inner {
             let progress_tx = self.channel(job_id).await;
             match pipeline::run(&self.state, input, Some(progress_tx)).await {
                 Ok(out) => {
-                    self.set_phase(job_id, Lifecycle::WritingNas, attempt).await?;
+                    self.set_phase(job_id, Lifecycle::Streaming, attempt).await?;
                     let m4b = out.m4b_path.display().to_string();
                     let aaxc = out.aaxc_path.display().to_string();
                     self.save_outcome_done(job_id, &aaxc, &m4b).await?;
