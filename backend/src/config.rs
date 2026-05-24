@@ -27,6 +27,25 @@ pub struct Config {
     pub abs_url: Option<String>,
     pub abs_token: Option<String>,
     pub abs_library_id: Option<String>,
+    pub oidc: Option<OidcSettings>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OidcSettings {
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_url: String,
+}
+
+impl OidcSettings {
+    fn from_env() -> Option<Self> {
+        let issuer = env::var("OIDC_ISSUER").ok().filter(|s| !s.is_empty())?;
+        let client_id = env::var("OIDC_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
+        let client_secret = env::var("OIDC_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
+        let redirect_url = env::var("OIDC_REDIRECT_URL").ok().filter(|s| !s.is_empty())?;
+        Some(Self { issuer, client_id, client_secret, redirect_url })
+    }
 }
 
 impl Config {
@@ -92,6 +111,7 @@ impl Config {
             abs_url: env::var("ABS_URL").ok(),
             abs_token: env::var("ABS_TOKEN").ok(),
             abs_library_id: env::var("ABS_LIBRARY_ID").ok(),
+            oidc: OidcSettings::from_env(),
         })
     }
 }

@@ -33,6 +33,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/status", get(status))
         .route("/auth/login", get(a::login))
+        .route("/auth/callback", get(a::callback))
         .route("/auth/logout", post(a::logout))
         .route("/api/me", get(me))
         .route("/api/settings", get(get_settings).patch(patch_settings))

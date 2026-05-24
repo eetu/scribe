@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod filenaming;
+pub mod oidc;
 pub mod pipeline;
 pub mod poller;
 pub mod press;
@@ -58,12 +59,31 @@ pub async fn run_server() -> anyhow::Result<()> {
         .user_agent(concat!("scribe/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
+    // Discover OIDC at boot if env vars present. A failure here logs and
+    // falls back to DEV_AUTH path — production deploys with DEV_AUTH off
+    // and discovery failing means /auth/login returns 503 until kanidm is
+    // reachable + the client secret is wired.
+    let oidc = match &cfg.oidc {
+        Some(s) => match oidc::OidcContext::discover(s).await {
+            Ok(c) => {
+                tracing::info!(issuer = %s.issuer, "oidc provider discovered");
+                Some(Arc::new(c))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "oidc discovery failed; falling back to DEV_AUTH or 503");
+                None
+            }
+        },
+        None => None,
+    };
+
     let state = AppState {
         cfg: Arc::new(cfg.clone()),
         db,
         http,
         cookie_key,
         queue: Arc::new(std::sync::OnceLock::new()),
+        oidc,
     };
 
     let q = queue::Queue::new(state.clone());

@@ -30,3 +30,5 @@ base64 = { workspace = true }
 dotenvy = { workspace = true }
 rusqlite = { version = "0.39", features = ["bundled"] }
 rand = "0.9"
+openidconnect = { workspace = true }
+time = "0.3"

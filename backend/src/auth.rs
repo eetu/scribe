@@ -1,22 +1,26 @@
 //! Session-based auth + profile resolution.
 //!
-//! Two modes:
-//!   * `DEV_AUTH=1` — `GET /auth/login?username=dev[&email=foo@bar]` writes
-//!     a signed cookie directly. No OIDC. For local dev.
-//!   * OIDC kanidm — `GET /auth/login` redirects to issuer, `/auth/callback`
-//!     validates and writes the cookie. (Wiring lives in oidc.rs; this MVP
-//!     stubs it until `OIDC_ISSUER` is populated.)
+//! Login priority (matches chat):
+//!   1. OIDC configured + provider discovered → 302 to authorize URL
+//!   2. `DEV_AUTH=1` → mint a session for `?username=foo[&email=…]`
+//!   3. Otherwise → 503 with a hint
 //!
-//! Cookie payload: `sub|email` (pipe-separated). The `AuthProfile`
-//! extractor resolves both fields, walks the profile table via the
-//! v2 link chain (sub match → email match → auto-create), and exposes
-//! a populated `Profile` to handlers.
+//! Cookie payload: `sub|email` in the signed `scribe_session` cookie. The
+//! `AuthProfile` extractor walks the profile table via the v2 link chain
+//! (sub match → email match → auto-create) and exposes a populated
+//! `Profile` to handlers.
+//!
+//! OIDC handshake values (csrf state, nonce, PKCE verifier, post-login
+//! next URL) round-trip in a separate signed cookie `scribe_oidc` —
+//! axum-extra's `SignedCookieJar` enforces integrity, and the handshake
+//! cookie is removed the moment the callback consumes it.
 
 use axum::extract::{FromRef, FromRequestParts, Query, State};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::cookie::{Cookie, Key, SameSite, SignedCookieJar};
+use openidconnect::{Nonce, PkceCodeVerifier};
 use serde::Deserialize;
 
 use crate::error::AppError;
@@ -24,6 +28,7 @@ use crate::profile::{self, Profile};
 use crate::state::AppState;
 
 const COOKIE_NAME: &str = "scribe_session";
+const OIDC_COOKIE: &str = "scribe_oidc";
 
 /// Bytes extracted from the SESSION_KEY env. 64-byte minimum for signing.
 pub fn cookie_key(hex: &str) -> Key {
@@ -117,26 +122,130 @@ fn sanitize_next(next: Option<&str>) -> String {
 }
 
 /// `GET /auth/login`
-///
-/// In DEV_AUTH mode, writes the session cookie immediately. Otherwise
-/// (OIDC) returns 501 until oidc.rs is wired up.
 pub async fn login(
     State(state): State<AppState>,
     jar: SignedCookieJar,
     Query(q): Query<LoginQuery>,
 ) -> Result<Response, AppError> {
-    if !state.cfg.dev_auth {
-        return Err(AppError::BadRequest(
-            "OIDC login not wired yet — set DEV_AUTH=1 for now".into(),
-        ));
-    }
-    let user = q.username.unwrap_or_else(|| "dev".to_string());
-    let email = q.email.unwrap_or_else(|| format!("{user}@local"));
     let dest = sanitize_next(q.next.as_deref());
-    // Ensure the profile exists before handing out a cookie so a 403 fires
-    // here (closed registration) rather than on the next /api/me call.
-    let _profile = profile::resolve_or_create(&state, &user, &email, None).await?;
-    Ok((write_cookie(jar, &user, &email), Redirect::to(&dest)).into_response())
+
+    // 1. OIDC if discovered.
+    if let Some(oidc) = &state.oidc {
+        let auth = oidc.authorize();
+        // Stash the handshake values in a separate signed cookie so the
+        // callback can pull them back. Format: csrf|nonce|pkce|next.
+        let payload = format!(
+            "{}|{}|{}|{}",
+            auth.csrf.secret(),
+            auth.nonce.secret(),
+            auth.pkce_verifier.secret(),
+            dest
+        );
+        let cookie = Cookie::build((OIDC_COOKIE, payload))
+            .path("/")
+            .http_only(true)
+            .same_site(SameSite::Lax)
+            .secure(false)
+            .max_age(time::Duration::minutes(10))
+            .build();
+        return Ok((jar.add(cookie), Redirect::to(auth.url.as_str())).into_response());
+    }
+
+    // 2. DEV_AUTH fallback.
+    if state.cfg.dev_auth {
+        let user = q.username.unwrap_or_else(|| "dev".to_string());
+        let email = q.email.unwrap_or_else(|| format!("{user}@local"));
+        let _profile = profile::resolve_or_create(&state, &user, &email, None).await?;
+        return Ok((write_cookie(jar, &user, &email), Redirect::to(&dest)).into_response());
+    }
+
+    // 3. Nothing configured.
+    Err(AppError::BadRequest(
+        "auth not configured. set DEV_AUTH=1 or all four OIDC_* env vars".into(),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+/// `GET /auth/callback`
+pub async fn callback(
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+    Query(q): Query<CallbackQuery>,
+) -> Result<Response, AppError> {
+    let oidc = state
+        .oidc
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("oidc not configured".into()))?;
+
+    if let Some(err) = &q.error {
+        tracing::warn!(
+            "oidc provider returned error: {err} ({:?})",
+            q.error_description
+        );
+        return Err(AppError::BadRequest(format!(
+            "provider error: {err}{}",
+            q.error_description
+                .as_ref()
+                .map(|d| format!(" — {d}"))
+                .unwrap_or_default()
+        )));
+    }
+
+    let code = q
+        .code
+        .clone()
+        .ok_or_else(|| AppError::BadRequest("missing code".into()))?;
+    let returned_state = q
+        .state
+        .clone()
+        .ok_or_else(|| AppError::BadRequest("missing state".into()))?;
+
+    let handshake = jar
+        .get(OIDC_COOKIE)
+        .map(|c| c.value().to_string())
+        .ok_or_else(|| AppError::BadRequest("session missing oidc handshake values".into()))?;
+
+    // Drop the handshake cookie regardless of outcome below — replay is
+    // never useful and a partial state on retry is worse than restart.
+    let cleared = jar.remove(Cookie::build((OIDC_COOKIE, "")).path("/").build());
+
+    let parts: Vec<&str> = handshake.splitn(4, '|').collect();
+    if parts.len() != 4 {
+        return Err(AppError::BadRequest("malformed handshake cookie".into()));
+    }
+    let (csrf, nonce, pkce, dest) = (parts[0], parts[1], parts[2], parts[3]);
+
+    if csrf != returned_state {
+        tracing::warn!("oidc state mismatch — possible csrf");
+        return Err(AppError::BadRequest("state mismatch".into()));
+    }
+
+    let claims = oidc
+        .exchange(
+            &code,
+            PkceCodeVerifier::new(pkce.to_string()),
+            Nonce::new(nonce.to_string()),
+        )
+        .await
+        .map_err(|e| AppError::Upstream(e.to_string()))?;
+
+    let _profile = profile::resolve_or_create(
+        &state,
+        &claims.sub,
+        &claims.email,
+        claims.display_name.as_deref(),
+    )
+    .await?;
+
+    let dest = sanitize_next(Some(dest));
+    Ok((write_cookie(cleared, &claims.sub, &claims.email), Redirect::to(&dest)).into_response())
 }
 
 /// `POST /auth/logout`

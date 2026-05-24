@@ -17,6 +17,10 @@ pub struct AppState {
     /// an already-built AppState (it spawns workers that capture it), so we
     /// can't put the Queue inside the struct it depends on without a cycle.
     pub queue: Arc<OnceLock<crate::queue::Queue>>,
+    /// Discovered OIDC provider — `None` when env vars aren't set or
+    /// discovery failed at boot. `/auth/login` falls back to DEV_AUTH in
+    /// that case (or 503 if DEV_AUTH is off too).
+    pub oidc: Option<Arc<crate::oidc::OidcContext>>,
 }
 
 impl AppState {
