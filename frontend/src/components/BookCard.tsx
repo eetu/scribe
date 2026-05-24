@@ -56,9 +56,16 @@ export default function BookCard({
         )}
       </div>
       <div
-        css={{ padding: 12, display: "flex", flexDirection: "column", gap: 6 }}
+        css={{
+          padding: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          flex: 1,
+        }}
       >
         <h3
+          title={book.title}
           css={{
             margin: 0,
             fontFamily: theme.fonts.heading,
@@ -66,17 +73,26 @@ export default function BookCard({
             fontWeight: 500,
             lineHeight: 1.25,
             color: theme.colors.text.main,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            minHeight: "calc(14px * 1.25 * 2)",
           }}
         >
           {book.title}
         </h3>
         <p
+          title={book.authors.join(", ")}
           css={{
             margin: 0,
             fontFamily: theme.fonts.body,
             fontSize: 12,
             color: theme.colors.text.muted,
             lineHeight: 1.3,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
           {book.authors.join(", ") || "unknown author"}
@@ -86,7 +102,9 @@ export default function BookCard({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginTop: 4,
+            marginTop: "auto",
+            paddingTop: 4,
+            minHeight: 28,
           }}
         >
           <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
