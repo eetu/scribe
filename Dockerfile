@@ -136,4 +136,8 @@ USER 1000
 
 EXPOSE 3004
 
-CMD ["uv", "run", "shim"]
+# Call the entry-point binary baked into the venv directly. `uv run` would
+# probe its own cache dir at startup (and fail Permission-denied at /app
+# /.cache/uv when running as USER 1000) — we already locked the venv at
+# build time so there's nothing left for uv to do at runtime.
+CMD ["/app/.venv/bin/shim"]
