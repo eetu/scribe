@@ -67,12 +67,12 @@ type Stage =
   | { kind: "idle" }
   | { kind: "starting" }
   | {
-    kind: "open";
-    session_id: string;
-    open_url: string;
-    instructions: string;
-    redirect: string;
-  }
+      kind: "open";
+      session_id: string;
+      open_url: string;
+      instructions: string;
+      redirect: string;
+    }
   | { kind: "finishing" }
   | { kind: "done"; account_id: string }
   | { kind: "error"; message: string };
