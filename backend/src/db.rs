@@ -18,7 +18,7 @@ pub struct Db {
 /// Current schema version. Bump + add a migration block when shipping
 /// a schema change to a deployed instance. Anything from `0` is a fresh
 /// install and runs the full `SCHEMA` batch.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 impl Db {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
@@ -42,6 +42,25 @@ impl Db {
         if current < 1 {
             conn.execute_batch(SCHEMA)?;
         }
+        if current < 2 {
+            // Drop role + display_name columns introduced in the original
+            // v1 schema. kanidm is the bouncer — scribe doesn't need an
+            // admin/user split. SQLite 3.35+ supports DROP COLUMN; bundled
+            // rusqlite 0.39 ships 3.49.
+            for stmt in [
+                "ALTER TABLE profile DROP COLUMN role",
+                "ALTER TABLE profile DROP COLUMN display_name",
+            ] {
+                if let Err(e) = conn.execute(stmt, []) {
+                    // Already absent on fresh installs that hit the v2
+                    // baseline (see SCHEMA below) — swallow and continue.
+                    let msg = e.to_string();
+                    if !msg.contains("no such column") {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
@@ -52,8 +71,6 @@ CREATE TABLE profile (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_sub TEXT UNIQUE,
   email TEXT NOT NULL UNIQUE,
-  role TEXT NOT NULL DEFAULT 'user',
-  display_name TEXT,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX idx_profile_sub ON profile(user_sub);

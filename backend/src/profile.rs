@@ -1,18 +1,14 @@
 //! Per-user profile model.
 //!
-//! v2 introduced `profile`/`profile_settings` tables. Each authenticated
-//! user (OIDC sub or DEV_AUTH cookie) maps to exactly one profile row.
-//! Audible accounts hang off `accounts.profile_id`, library books +
-//! jobs are scoped via that FK.
+//! Each authenticated user (OIDC sub or DEV_AUTH cookie) maps to exactly
+//! one profile row. Audible accounts hang off `accounts.profile_id`,
+//! library books + jobs are scoped via that FK.
 //!
-//! Lookup chain on first contact:
-//!   1. `user_sub` match → existing profile
-//!   2. `email` match with `user_sub IS NULL` → IaC-seeded row, link sub
-//!   3. unknown sub + email → auto-create unless
-//!      `SCRIBE_OPEN_REGISTRATION=0` is set
-//!
-//! `SCRIBE_ADMIN_EMAIL` (when set) pins which email becomes admin on
-//! auto-create / first contact. Everyone else gets role=user.
+//! kanidm is the bouncer — if a request reaches `resolve_or_create`,
+//! the user is allowed in. First contact (no profile yet for this sub)
+//! auto-creates one. No role distinction; no admin gate. The single-
+//! library v1 ties output paths to env vars; v2 will move them to a
+//! `libraries` table with per-profile binding.
 
 use chrono::Utc;
 use rusqlite::OptionalExtension;
@@ -26,83 +22,21 @@ pub struct Profile {
     pub id: i64,
     pub user_sub: Option<String>,
     pub email: String,
-    pub role: String,
-    pub display_name: Option<String>,
     pub created_at: i64,
-}
-
-impl Profile {
-    pub fn is_admin(&self) -> bool {
-        self.role == "admin"
-    }
 }
 
 /// Resolve (or create) the profile for an authenticated request.
 ///
-/// `email` may be `None` for DEV_AUTH when only `?username=` is given —
-/// callers should default it to `{sub}@local` before this is reached.
-pub async fn resolve_or_create(
-    state: &AppState,
-    sub: &str,
-    email: &str,
-    display_name: Option<&str>,
-) -> Result<Profile, AppError> {
+/// `email` defaults to `{sub}@local` in callers when the upstream identity
+/// provider doesn't surface a real email (e.g. DEV_AUTH without ?email=).
+pub async fn resolve_or_create(state: &AppState, sub: &str, email: &str) -> Result<Profile, AppError> {
     let sub_s = sub.to_string();
     let email_s = email.to_lowercase();
-    let dn = display_name.map(|s| s.to_string());
 
-    // Fast path: sub already linked.
     if let Some(p) = lookup_by_sub(state, &sub_s).await? {
         return Ok(p);
     }
-
-    // IaC-seeded path: row with matching email but no sub yet — claim it.
-    let email_for_link = email_s.clone();
-    let sub_for_link = sub_s.clone();
-    let linked: Option<Profile> = state
-        .db
-        .with(move |c| {
-            let updated = c.execute(
-                "UPDATE profile SET user_sub = ?1 WHERE email = ?2 AND user_sub IS NULL",
-                rusqlite::params![sub_for_link, email_for_link],
-            )?;
-            if updated == 0 {
-                return Ok(None);
-            }
-            let p = c
-                .query_row(
-                    "SELECT id, user_sub, email, role, display_name, created_at
-                     FROM profile WHERE user_sub = ?1",
-                    rusqlite::params![sub_for_link],
-                    row_to_profile,
-                )
-                .optional()?;
-            Ok(p)
-        })
-        .await?;
-    if let Some(p) = linked {
-        return Ok(p);
-    }
-
-    // Auto-create policy:
-    //   - open_registration=1 → any kanidm-authenticated user gets a profile
-    //   - closed + email matches SCRIBE_ADMIN_EMAIL → admin still bootstraps
-    //   - closed + no admin match → 403 (random users blocked)
-    let is_admin_email = state
-        .cfg
-        .admin_email
-        .as_ref()
-        .is_some_and(|e| e.eq_ignore_ascii_case(&email_s));
-    if !state.cfg.open_registration && !is_admin_email {
-        tracing::warn!(
-            sub = %sub_s,
-            email = %email_s,
-            "closed registration blocked login (email != SCRIBE_ADMIN_EMAIL)"
-        );
-        return Err(AppError::Forbidden);
-    }
-    let role = pick_role(state, &email_s).await?;
-    create(state, &sub_s, &email_s, dn.as_deref(), &role).await
+    create(state, &sub_s, &email_s).await
 }
 
 async fn lookup_by_sub(state: &AppState, sub: &str) -> Result<Option<Profile>, AppError> {
@@ -111,8 +45,7 @@ async fn lookup_by_sub(state: &AppState, sub: &str) -> Result<Option<Profile>, A
         .db
         .with(move |c| {
             c.query_row(
-                "SELECT id, user_sub, email, role, display_name, created_at
-                 FROM profile WHERE user_sub = ?1",
+                "SELECT id, user_sub, email, created_at FROM profile WHERE user_sub = ?1",
                 rusqlite::params![sub_s],
                 row_to_profile,
             )
@@ -122,25 +55,16 @@ async fn lookup_by_sub(state: &AppState, sub: &str) -> Result<Option<Profile>, A
     Ok(row)
 }
 
-async fn create(
-    state: &AppState,
-    sub: &str,
-    email: &str,
-    display_name: Option<&str>,
-    role: &str,
-) -> Result<Profile, AppError> {
+async fn create(state: &AppState, sub: &str, email: &str) -> Result<Profile, AppError> {
     let sub_s = sub.to_string();
     let email_s = email.to_string();
-    let dn = display_name.map(|s| s.to_string());
-    let role_s = role.to_string();
     let now = Utc::now().timestamp();
     state
         .db
         .with(move |c| {
             c.execute(
-                "INSERT INTO profile (user_sub, email, role, display_name, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![sub_s, email_s, role_s, dn, now],
+                "INSERT INTO profile (user_sub, email, created_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![sub_s, email_s, now],
             )?;
             Ok(())
         })
@@ -148,30 +72,12 @@ async fn create(
     Ok(lookup_by_sub(state, sub).await?.expect("just inserted"))
 }
 
-/// Admin role applies to:
-///   - the email pinned by `SCRIBE_ADMIN_EMAIL`, OR
-///   - the very first profile created (bootstrap-of-last-resort)
-async fn pick_role(state: &AppState, email: &str) -> Result<String, AppError> {
-    if let Some(admin_email) = &state.cfg.admin_email {
-        if admin_email.eq_ignore_ascii_case(email) {
-            return Ok("admin".into());
-        }
-    }
-    let count: i64 = state
-        .db
-        .with(|c| c.query_row("SELECT COUNT(*) FROM profile", [], |r| r.get(0)))
-        .await?;
-    Ok(if count == 0 { "admin" } else { "user" }.into())
-}
-
 fn row_to_profile(r: &rusqlite::Row<'_>) -> rusqlite::Result<Profile> {
     Ok(Profile {
         id: r.get(0)?,
         user_sub: r.get(1)?,
         email: r.get(2)?,
-        role: r.get(3)?,
-        display_name: r.get(4)?,
-        created_at: r.get(5)?,
+        created_at: r.get(3)?,
     })
 }
 

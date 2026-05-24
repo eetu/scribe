@@ -102,6 +102,39 @@ zero `SCRIBE_JOB_INTERJOB_DELAY_S`.
 Flip `SCRIBE_AUTO_ENQUEUE=0` if you want to review the library in the
 UI first and click "download all" (or per-book) explicitly.
 
+## Auth model
+
+kanidm is the bouncer. Anyone kanidm admits gets a scribe profile
+auto-created on first call to `/api/me`. No role distinction, no
+admin/user split, no closed-registration env. Cookie payload is
+`sub|email` signed with `SESSION_KEY`. Sessions survive restarts as
+long as `SESSION_KEY` stays put; the v1 schema doesn't persist
+sessions anywhere else.
+
+Profile model holds one row per OIDC sub. Audible accounts hang off
+`accounts.profile_id` — same profile can own multiple regions of the
+same Audible identity, and per-account isolation in queries always
+joins through `accounts.profile_id`.
+
+## Future: multi-library
+
+v1 hardwires the output paths (`SCRIBE_LIBRARY_DIR`, `SCRIBE_ORIGINAL_DIR`)
+via env, so one deployment serves exactly one library. The household
+multi-user case — every kanidm user gets their own audiobookshelf
+library on the NAS — is a real roadmap item:
+
+- new `libraries` table: `id, name, library_path, original_path,
+  filename_template_m4b, filename_template_original`
+- `profile.library_id` FK pinning each profile to a library
+- IaC seeds rows (one per kanidm person) + creates the directories
+- UI gains a library-create flow for new kanidm users to claim a
+  library on first login
+- per-library audiobookshelf scan path (one `Volume=...` per library
+  in the ABS quadlet) so each user's library is its own ABS root
+
+Not v1. Document so the next pass doesn't reach for the role/admin
+machinery that was already torn out.
+
 ## Environment
 
 | Var | Default | Purpose |

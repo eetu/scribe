@@ -70,7 +70,6 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
         "press_url": state.cfg.press_url,
         "press_healthy": press_health,
         "dev_auth": state.cfg.dev_auth,
-        "open_registration": state.cfg.open_registration,
         "auto_enqueue_default": state.cfg.auto_enqueue_new,
         "library_dir": state.cfg.library_dir,
         "original_dir": state.cfg.original_dir,
@@ -85,8 +84,6 @@ async fn me(user: AuthProfile) -> Json<Value> {
         "sub": user.sub(),
         "profile_id": user.id(),
         "email": user.profile.email,
-        "role": user.profile.role,
-        "display_name": user.profile.display_name,
     }))
 }
 

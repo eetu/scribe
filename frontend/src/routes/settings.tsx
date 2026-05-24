@@ -35,7 +35,6 @@ function SettingsPage() {
     ["press", status.press_url ?? "(not configured)"],
     ["press healthy", status.press_healthy ? "yes" : "no"],
     ["dev_auth", status.dev_auth ? "on" : "off"],
-    ["open registration", status.open_registration ? "yes" : "no"],
     ["library dir", status.library_dir],
     ["original dir", status.original_dir],
     ["poll interval (min, default)", status.poll_interval_min_default],
@@ -134,22 +133,7 @@ function Header({ me }: { me: Me }) {
         settings
       </h2>
       <span css={{ fontSize: 12, color: theme.colors.text.muted }}>
-        {me.email}{" "}
-        <span
-          css={{
-            marginLeft: 6,
-            fontSize: 11,
-            padding: "2px 7px",
-            borderRadius: 999,
-            border: `1px solid ${theme.colors.border}`,
-            color:
-              me.role === "admin"
-                ? theme.colors.activity.on
-                : theme.colors.text.muted,
-          }}
-        >
-          {me.role}
-        </span>
+        {me.email}
       </span>
     </div>
   );

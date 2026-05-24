@@ -6,7 +6,6 @@ export type Status = {
   press_url: string | null;
   press_healthy: boolean;
   dev_auth: boolean;
-  open_registration: boolean;
   auto_enqueue_default: boolean;
   library_dir: string;
   original_dir: string;
@@ -17,8 +16,6 @@ export type Me = {
   sub: string;
   profile_id: number;
   email: string;
-  role: "admin" | "user";
-  display_name: string | null;
 };
 
 export type SettingEntry = {

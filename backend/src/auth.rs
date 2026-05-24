@@ -79,7 +79,7 @@ where
             .map(|c| c.value().to_string())
             .ok_or(AppError::Unauthorized)?;
         let (sub, email) = parse_cookie(&raw).ok_or(AppError::Unauthorized)?;
-        let profile = profile::resolve_or_create(&app_state, sub, email, None).await?;
+        let profile = profile::resolve_or_create(&app_state, sub, email).await?;
         Ok(AuthProfile { profile })
     }
 }
@@ -155,7 +155,7 @@ pub async fn login(
     if state.cfg.dev_auth {
         let user = q.username.unwrap_or_else(|| "dev".to_string());
         let email = q.email.unwrap_or_else(|| format!("{user}@local"));
-        let _profile = profile::resolve_or_create(&state, &user, &email, None).await?;
+        let _profile = profile::resolve_or_create(&state, &user, &email).await?;
         return Ok((write_cookie(jar, &user, &email), Redirect::to(&dest)).into_response());
     }
 
@@ -236,13 +236,7 @@ pub async fn callback(
         .await
         .map_err(|e| AppError::Upstream(e.to_string()))?;
 
-    let _profile = profile::resolve_or_create(
-        &state,
-        &claims.sub,
-        &claims.email,
-        claims.display_name.as_deref(),
-    )
-    .await?;
+    let _profile = profile::resolve_or_create(&state, &claims.sub, &claims.email).await?;
 
     let dest = sanitize_next(Some(dest));
     Ok((write_cookie(cleared, &claims.sub, &claims.email), Redirect::to(&dest)).into_response())

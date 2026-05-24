@@ -154,13 +154,12 @@ impl OidcContext {
             .map(|e| e.as_str().to_string())
             .or_else(|| preferred_username.as_ref().map(|u| format!("{u}@local")))
             .unwrap_or_else(|| format!("{sub}@local"));
-        let display_name = preferred_username;
 
         // Token response is dropped here — we never store access/refresh
         // tokens. The session cookie holds only `{ sub, email }`.
         drop(token_response);
 
-        Ok(VerifiedClaims { sub, email, display_name })
+        Ok(VerifiedClaims { sub, email })
     }
 }
 
@@ -174,5 +173,4 @@ pub struct Authorize {
 pub struct VerifiedClaims {
     pub sub: String,
     pub email: String,
-    pub display_name: Option<String>,
 }
