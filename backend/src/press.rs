@@ -94,10 +94,12 @@ impl<'a> PressClient<'a> {
         let Some(url) = &self.state.cfg.press_url else {
             return Ok(false);
         };
+        // Send bearer — press itself exempts /health from auth, but a Caddy
+        // (or other reverse proxy) sitting in front may gate every path on
+        // the bearer. Probe carries the same Authorization scribe uses for
+        // real job calls, so "healthy" here matches "we can do work".
         let r = self
-            .state
-            .http
-            .get(format!("{}/health", url.trim_end_matches('/')))
+            .auth(self.state.http.get(format!("{}/health", url.trim_end_matches('/'))))
             .send()
             .await;
         Ok(matches!(r, Ok(resp) if resp.status().is_success()))
