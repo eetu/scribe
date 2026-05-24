@@ -21,6 +21,15 @@ use crate::sync;
 
 pub fn router(state: AppState) -> Router {
     use crate::auth as a;
+    use tower_http::services::{ServeDir, ServeFile};
+
+    let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "./dist".into());
+    // SPA fallback: any path that doesn't match a built asset returns
+    // index.html so TanStack Router can take over client-side (refreshing
+    // on /accounts or /jobs still works).
+    let index = format!("{}/index.html", static_dir.trim_end_matches('/'));
+    let spa_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
+
     Router::new()
         .route("/status", get(status))
         .route("/auth/login", get(a::login))
@@ -40,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
+        .fallback_service(spa_service)
         .with_state(state)
 }
 
