@@ -99,12 +99,28 @@ pub async fn run(state: &AppState, input: PipelineInput) -> Result<PipelineOutco
         .await?;
     tracing::info!(%press_job_id, %m4b_bytes, path = %m4b_path.display(), "M4B written");
 
-    // 6. cleanup
+    // 6. write `.scribe.json` sidecar next to the AAXC — survives a DB wipe.
+    let sc = scribe_shared::Sidecar {
+        asin: input.asin.clone(),
+        account_id: input.account_id.clone(),
+        title: src.title.clone(),
+        downloaded_at: chrono::Utc::now().timestamp(),
+        m4b_path: m4b_path.display().to_string(),
+        aaxc_path: aaxc_path.display().to_string(),
+        voucher_refresh_date: None,
+        customer_name: None,
+        scribe_version: env!("CARGO_PKG_VERSION").into(),
+    };
+    if let Err(e) = crate::sidecar::write(&aaxc_path, &sc).await {
+        tracing::warn!(asin = %input.asin, error = ?e, "sidecar write failed");
+    }
+
+    // 7. cleanup
     if let Err(e) = press.delete(press_job_id).await {
         tracing::warn!(%press_job_id, error = ?e, "press DELETE failed (tmp will age out)");
     }
 
-    // 7. notify ABS (non-fatal)
+    // 8. notify ABS (non-fatal)
     let _ = notify_abs(state).await;
 
     Ok(PipelineOutcome {

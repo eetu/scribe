@@ -8,7 +8,9 @@ pub mod poller;
 pub mod press;
 pub mod profile;
 pub mod queue;
+pub mod reconcile;
 pub mod routes;
+pub mod sidecar;
 pub mod shim;
 pub mod state;
 pub mod sync;
@@ -79,6 +81,7 @@ pub async fn run_server() -> anyhow::Result<()> {
     ));
 
     poller::spawn(state.clone());
+    reconcile::spawn_boot_scan(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!(bind = %cfg.bind, dev_auth = cfg.dev_auth, "scribe listening");

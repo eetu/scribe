@@ -35,6 +35,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/accounts/{id}/deregister", post(deregister_account))
         .route("/api/library", get(list_library))
         .route("/api/library/sync", post(sync_library))
+        .route("/api/library/reconcile", post(reconcile_route))
         .route("/api/jobs", get(list_jobs).post(enqueue_job))
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
@@ -494,6 +495,18 @@ async fn cancel_job(
     assert_owns_job(&state, user.id(), job_id).await?;
     let cancelled = state.queue().cancel(job_id).await?;
     Ok(Json(json!({ "cancelled": cancelled })))
+}
+
+async fn reconcile_route(_user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
+    let report = crate::reconcile::scan(&state)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    Ok(Json(json!({
+        "sidecars_seen": report.sidecars_seen,
+        "jobs_inserted": report.jobs_inserted,
+        "jobs_already": report.jobs_already,
+        "errors": report.errors,
+    })))
 }
 
 async fn assert_owns_account(state: &AppState, profile_id: i64, account_id: &str) -> AppResult<()> {

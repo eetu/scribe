@@ -60,6 +60,33 @@ pub enum JobStatus {
     Cancelled,
 }
 
+/// Persisted next to each completed download (in `original_dir`).
+///
+/// Source of truth that survives a DB wipe — on boot, scribe walks
+/// original_dir for `*.scribe.json` files and re-creates the matching
+/// `jobs` rows with status=done. Pair this with the `asin=` ffmpeg
+/// metadata baked into the M4B so even a moved/renamed file can be
+/// traced back to its purchase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sidecar {
+    pub asin: String,
+    pub account_id: String,
+    pub title: String,
+    pub downloaded_at: i64,
+    pub m4b_path: String,
+    pub aaxc_path: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub voucher_refresh_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub customer_name: Option<String>,
+    #[serde(default = "default_version")]
+    pub scribe_version: String,
+}
+
+fn default_version() -> String {
+    "unknown".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobRecord {
     pub id: Uuid,

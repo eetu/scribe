@@ -125,6 +125,10 @@ async fn run_ffmpeg(
     cmd.arg("-metadata").arg(format!("title={}", req.title));
     cmd.arg("-metadata").arg(format!("artist={}", req.authors.join(", ")));
     cmd.arg("-metadata").arg(format!("album_artist={}", req.authors.join(", ")));
+    // Identity tag so scribe can recognise its own files after a DB wipe
+    // (sidecar JSON is the primary source, this is the lifeboat).
+    cmd.arg("-metadata").arg(format!("asin={}", req.asin));
+    cmd.arg("-metadata").arg(format!("source=scribe/{}", env!("CARGO_PKG_VERSION")));
     if !req.narrators.is_empty() {
         // Audiobookshelf + Apple Books convention: composer holds the narrator.
         cmd.arg("-metadata")
