@@ -1,10 +1,50 @@
 import { useTheme } from "@emotion/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 
 import { api, type Book, type Job } from "../api";
 import BookCard from "../components/BookCard";
+
+const ACTIVE_JOB_PHASES = new Set([
+  "queued",
+  "fetching_voucher",
+  "downloading",
+  "converting",
+  "streaming",
+]);
+
+type FilterKey =
+  | "all"
+  | "done"
+  | "failed"
+  | "unavailable"
+  | "in_progress"
+  | "new";
+type SortKey = "title" | "author" | "added" | "status";
+
+function bucket(job: Job | null): Exclude<FilterKey, "all"> {
+  if (!job) return "new";
+  if (job.status === "done") return "done";
+  if (job.status === "failed") {
+    return job.error?.toLowerCase().startsWith("license denied")
+      ? "unavailable"
+      : "failed";
+  }
+  if (job.status === "cancelled") return "new";
+  if (ACTIVE_JOB_PHASES.has(job.status)) return "in_progress";
+  return "new";
+}
+
+// Status sort needs a deterministic order — group failures+unavailables
+// near the top so the user lands on the actionable rows first.
+const STATUS_RANK: Record<Exclude<FilterKey, "all">, number> = {
+  failed: 0,
+  unavailable: 1,
+  in_progress: 2,
+  new: 3,
+  done: 4,
+};
 
 export const Route = createFileRoute("/")({ component: LibraryPage });
 
@@ -21,10 +61,12 @@ function LibraryPage() {
     refreshInterval: 5000,
   });
   const [syncing, setSyncing] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [sort, setSort] = useState<SortKey>("title");
+
+  const items: Book[] = useMemo(() => data?.items ?? [], [data]);
 
   if (isLoading) return null;
-
-  const items: Book[] = data?.items ?? [];
 
   if (items.length === 0) {
     return (
@@ -67,6 +109,38 @@ function LibraryPage() {
     const peers = (sigToAsins.get(sig(b)) ?? []).filter((a) => a !== b.asin);
     if (peers.length > 0) dupesByAsin.set(b.asin, peers);
   }
+
+  const buckets = new Map<string, Exclude<FilterKey, "all">>();
+  for (const b of items) {
+    buckets.set(b.asin, bucket(jobByAsin.get(b.asin) ?? null));
+  }
+  const counts: Record<FilterKey, number> = {
+    all: items.length,
+    done: 0,
+    failed: 0,
+    unavailable: 0,
+    in_progress: 0,
+    new: 0,
+  };
+  for (const v of buckets.values()) counts[v]++;
+
+  const visible = items
+    .filter((b) => filter === "all" || buckets.get(b.asin) === filter)
+    .sort((a, b) => {
+      if (sort === "author") {
+        return (a.authors[0] ?? "").localeCompare(b.authors[0] ?? "");
+      }
+      if (sort === "added") {
+        return (b.purchase_date ?? "").localeCompare(a.purchase_date ?? "");
+      }
+      if (sort === "status") {
+        const ra = STATUS_RANK[buckets.get(a.asin) ?? "new"];
+        const rb = STATUS_RANK[buckets.get(b.asin) ?? "new"];
+        if (ra !== rb) return ra - rb;
+        return a.title.localeCompare(b.title);
+      }
+      return a.title.localeCompare(b.title);
+    });
 
   // Backlog hint: books exist but nothing is queued (e.g., first deploy
   // after linking an account). Auto-enqueue only fires when a *new*
@@ -167,12 +241,62 @@ function LibraryPage() {
       </div>
       <div
         css={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div css={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {(
+            [
+              ["all", "all"],
+              ["done", "done"],
+              ["in_progress", "in progress"],
+              ["failed", "failed"],
+              ["unavailable", "unavailable"],
+              ["new", "new"],
+            ] as [FilterKey, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              css={filterChip(theme, filter === key)}
+            >
+              {label} {counts[key]}
+            </button>
+          ))}
+        </div>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          css={{
+            background: "transparent",
+            border: `1px solid ${theme.colors.border}`,
+            borderRadius: theme.border.radius,
+            padding: "6px 10px",
+            color: theme.colors.text.muted,
+            fontFamily: theme.fonts.heading,
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          <option value="title">sort: title</option>
+          <option value="author">sort: author</option>
+          <option value="added">sort: added</option>
+          <option value="status">sort: status</option>
+        </select>
+      </div>
+      <div
+        css={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
           gap: 16,
         }}
       >
-        {items.map((b) => (
+        {visible.map((b) => (
           <BookCard
             key={`${b.account_id}:${b.asin}`}
             book={b}
@@ -187,6 +311,23 @@ function LibraryPage() {
       </div>
     </>
   );
+}
+
+function filterChip(theme: ReturnType<typeof useTheme>, active: boolean) {
+  return {
+    background: active ? theme.colors.activity.offBackground : "transparent",
+    border: `1px solid ${active ? theme.colors.activity.on : theme.colors.border}`,
+    borderRadius: theme.border.radius,
+    padding: "5px 10px",
+    cursor: "pointer",
+    color: active ? theme.colors.activity.on : theme.colors.text.muted,
+    fontFamily: theme.fonts.heading,
+    fontSize: 12,
+    "&:hover": {
+      color: theme.colors.activity.on,
+      borderColor: theme.colors.activity.on,
+    },
+  } as const;
 }
 
 function chipButton(theme: ReturnType<typeof useTheme>) {
