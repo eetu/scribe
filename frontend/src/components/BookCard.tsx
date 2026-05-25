@@ -6,6 +6,7 @@ type Props = {
   book: Book;
   job: Job | null;
   onDownload: () => void;
+  onReconvert: () => void;
   /** ASINs of other library rows sharing this title + primary author.
    * Surfaced as a small "dupe" badge so the user can decide whether to
    * download both editions or skip one. Empty when no overlap. */
@@ -16,6 +17,7 @@ export default function BookCard({
   book,
   job,
   onDownload,
+  onReconvert,
   duplicateOf = [],
 }: Props) {
   const theme = useTheme();
@@ -131,30 +133,40 @@ export default function BookCard({
             )}
           </div>
           {status.canEnqueue && (
-            <button
-              onClick={onDownload}
-              css={{
-                background: "transparent",
-                border: `1px solid ${theme.colors.border}`,
-                borderRadius: 4,
-                fontFamily: theme.fonts.heading,
-                fontSize: 11,
-                padding: "3px 8px",
-                color: theme.colors.text.main,
-                cursor: "pointer",
-                "&:hover": {
-                  borderColor: theme.colors.activity.on,
-                  color: theme.colors.activity.on,
-                },
-              }}
-            >
+            <button onClick={onDownload} css={cardActionButton(theme)}>
               download
+            </button>
+          )}
+          {status.canReconvert && (
+            <button
+              onClick={onReconvert}
+              css={cardActionButton(theme)}
+              title="rebuild m4b from the cached encrypted source"
+            >
+              re-convert
             </button>
           )}
         </div>
       </div>
     </article>
   );
+}
+
+function cardActionButton(theme: ReturnType<typeof useTheme>) {
+  return {
+    background: "transparent",
+    border: `1px solid ${theme.colors.border}`,
+    borderRadius: 4,
+    fontFamily: theme.fonts.heading,
+    fontSize: 11,
+    padding: "3px 8px",
+    color: theme.colors.text.main,
+    cursor: "pointer",
+    "&:hover": {
+      borderColor: theme.colors.activity.on,
+      color: theme.colors.activity.on,
+    },
+  } as const;
 }
 
 function StatusChip({
@@ -195,11 +207,39 @@ function jobStatus(job: Job | null): {
   label: string;
   tone: "muted" | "active" | "ok" | "err";
   canEnqueue: boolean;
+  canReconvert: boolean;
   tooltip?: string;
 } {
-  if (!job) return { label: "new", tone: "muted", canEnqueue: true };
-  if (job.status === "done")
-    return { label: "done", tone: "ok", canEnqueue: false };
+  if (!job)
+    return {
+      label: "new",
+      tone: "muted",
+      canEnqueue: true,
+      canReconvert: false,
+    };
+  if (job.status === "done") {
+    // A done row with the m4b gone from disk means someone deleted the
+    // file out from under scribe (ABS purge, manual cleanup, NAS
+    // tinkering). Surface that distinctly and offer a reconvert from
+    // the cached AAXC instead of forcing a full Audible round-trip.
+    if (!job.m4b_present) {
+      return {
+        label: "missing",
+        tone: "err",
+        canEnqueue: false,
+        canReconvert: job.aaxc_present,
+        tooltip: job.aaxc_present
+          ? "m4b deleted — re-convert from stored aaxc"
+          : "m4b and aaxc both gone — re-download required",
+      };
+    }
+    return {
+      label: "done",
+      tone: "ok",
+      canEnqueue: false,
+      canReconvert: false,
+    };
+  }
   if (job.status === "failed") {
     // License-denied failures are terminal: Audible has refused to issue
     // a voucher (Plus catalog rotation, region mismatch). Retrying won't
@@ -210,14 +250,21 @@ function jobStatus(job: Job | null): {
       label: denied ? "unavailable" : "failed",
       tone: "err",
       canEnqueue: !denied,
+      canReconvert: false,
       tooltip: job.error ?? undefined,
     };
   }
   if (job.status === "cancelled")
-    return { label: "cancelled", tone: "muted", canEnqueue: true };
+    return {
+      label: "cancelled",
+      tone: "muted",
+      canEnqueue: true,
+      canReconvert: false,
+    };
   return {
     label: job.status.replace("_", " "),
     tone: "active",
     canEnqueue: false,
+    canReconvert: false,
   };
 }

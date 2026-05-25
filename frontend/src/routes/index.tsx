@@ -19,13 +19,14 @@ type FilterKey =
   | "done"
   | "failed"
   | "unavailable"
+  | "missing"
   | "in_progress"
   | "new";
 type SortKey = "title" | "author" | "added" | "status";
 
 function bucket(job: Job | null): Exclude<FilterKey, "all"> {
   if (!job) return "new";
-  if (job.status === "done") return "done";
+  if (job.status === "done") return job.m4b_present ? "done" : "missing";
   if (job.status === "failed") {
     return job.error?.toLowerCase().startsWith("license denied")
       ? "unavailable"
@@ -36,14 +37,16 @@ function bucket(job: Job | null): Exclude<FilterKey, "all"> {
   return "new";
 }
 
-// Status sort needs a deterministic order — group failures+unavailables
-// near the top so the user lands on the actionable rows first.
+// Status sort needs a deterministic order — group failures, missing,
+// and unavailables near the top so the user lands on the actionable
+// rows first.
 const STATUS_RANK: Record<Exclude<FilterKey, "all">, number> = {
-  failed: 0,
-  unavailable: 1,
-  in_progress: 2,
-  new: 3,
-  done: 4,
+  missing: 0,
+  failed: 1,
+  unavailable: 2,
+  in_progress: 3,
+  new: 4,
+  done: 5,
 };
 
 export const Route = createFileRoute("/")({ component: LibraryPage });
@@ -119,6 +122,7 @@ function LibraryPage() {
     done: 0,
     failed: 0,
     unavailable: 0,
+    missing: 0,
     in_progress: 0,
     new: 0,
   };
@@ -225,6 +229,10 @@ function LibraryPage() {
               try {
                 await api.syncLibrary({ full: true });
                 mutate("/api/library");
+                // Also re-stat job rows so missing-file detection
+                // surfaces immediately instead of waiting for the
+                // next 5s SWR tick.
+                mutate("/api/jobs");
               } finally {
                 setSyncing(false);
               }
@@ -255,6 +263,7 @@ function LibraryPage() {
               ["all", "all"],
               ["done", "done"],
               ["in_progress", "in progress"],
+              ["missing", "missing"],
               ["failed", "failed"],
               ["unavailable", "unavailable"],
               ["new", "new"],
@@ -304,6 +313,12 @@ function LibraryPage() {
             duplicateOf={dupesByAsin.get(b.asin)}
             onDownload={async () => {
               await api.enqueueJob({ account_id: b.account_id, asin: b.asin });
+              mutate("/api/jobs");
+            }}
+            onReconvert={async () => {
+              const j = jobByAsin.get(b.asin);
+              if (!j) return;
+              await api.reconvertJob(j.id);
               mutate("/api/jobs");
             }}
           />

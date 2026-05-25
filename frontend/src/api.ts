@@ -57,6 +57,8 @@ export type Job = {
   created_at: number;
   updated_at: number;
   error: string | null;
+  m4b_present: boolean;
+  aaxc_present: boolean;
 };
 
 export type LoginStartResp = {
@@ -146,6 +148,8 @@ export const api = {
     }),
   cancelJob: (id: string) =>
     req<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  reconvertJob: (id: string) =>
+    req<{ ok: boolean }>(`/api/jobs/${id}/reconvert`, { method: "POST" }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
   settings: () => req<Settings>("/api/settings"),
   patchSettings: (body: Record<string, string>) =>

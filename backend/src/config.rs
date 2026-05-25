@@ -12,6 +12,11 @@ pub struct Config {
     pub press_token: Option<String>,
     pub library_dir: PathBuf,
     pub original_dir: PathBuf,
+    /// LAN URL of this scribe instance, as seen from the press worker.
+    /// Used to mint short-lived `/internal/aaxc/<token>` URLs that point
+    /// press at locally-stored AAXC files during a reconvert. Unset =
+    /// reconvert disabled.
+    pub internal_url: Option<String>,
     pub poll_interval_min: u64,
     pub poll_jitter_percent: u32,
     pub poll_active_hour_start: u32,
@@ -66,6 +71,9 @@ impl Config {
             original_dir: env::var("SCRIBE_ORIGINAL_DIR")
                 .unwrap_or_else(|_| "/mnt/audiobooks/original".into())
                 .into(),
+            internal_url: env::var("SCRIBE_INTERNAL_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
             poll_interval_min: env::var("SCRIBE_POLL_INTERVAL_MIN")
                 .ok()
                 .and_then(|s| s.parse().ok())

@@ -50,6 +50,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
         .route("/api/jobs/{id}/cancel", post(cancel_job))
+        .route("/api/jobs/{id}/reconvert", post(reconvert_job))
+        .route("/internal/aaxc/{token}", get(serve_internal_aaxc))
         .fallback_service(spa_service)
         .with_state(state)
 }
@@ -393,11 +395,23 @@ async fn sync_library(
 
 async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
     let pid = user.id();
-    let rows = state
+    type Row = (
+        String,
+        String,
+        String,
+        String,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let rows: Vec<Row> = state
         .db
         .with(move |c| {
             let mut stmt = c.prepare(
-                "SELECT j.id, j.asin, j.account_id, j.status, j.created_at, j.updated_at, j.error
+                "SELECT j.id, j.asin, j.account_id, j.status, j.created_at, j.updated_at,
+                        j.error, j.m4b_path, j.aaxc_path
                  FROM jobs j
                  JOIN accounts a ON a.id = j.account_id
                  WHERE a.profile_id = ?1
@@ -405,21 +419,51 @@ async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResul
             )?;
             let rows = stmt
                 .query_map([pid], |r| {
-                    Ok(json!({
-                        "id": r.get::<_, String>(0)?,
-                        "asin": r.get::<_, String>(1)?,
-                        "account_id": r.get::<_, String>(2)?,
-                        "status": r.get::<_, String>(3)?,
-                        "created_at": r.get::<_, i64>(4)?,
-                        "updated_at": r.get::<_, i64>(5)?,
-                        "error": r.get::<_, Option<String>>(6)?,
-                    }))
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, i64>(5)?,
+                        r.get::<_, Option<String>>(6)?,
+                        r.get::<_, Option<String>>(7)?,
+                        r.get::<_, Option<String>>(8)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
         .await?;
-    Ok(Json(json!({ "items": rows })))
+    // Stat each path to surface filesystem drift — when a user deletes
+    // an m4b from ABS or the NAS share, the chip can flip to "missing"
+    // and the UI can offer a re-convert without waiting for the next
+    // poll/reconcile cycle.
+    let items = rows
+        .into_iter()
+        .map(|(id, asin, account_id, status, created_at, updated_at, error, m4b_path, aaxc_path)| {
+            let m4b_present = m4b_path
+                .as_deref()
+                .map(|p| std::path::Path::new(p).is_file())
+                .unwrap_or(false);
+            let aaxc_present = aaxc_path
+                .as_deref()
+                .map(|p| std::path::Path::new(p).is_file())
+                .unwrap_or(false);
+            json!({
+                "id": id,
+                "asin": asin,
+                "account_id": account_id,
+                "status": status,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "error": error,
+                "m4b_present": m4b_present,
+                "aaxc_present": aaxc_present,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({ "items": items })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,6 +577,56 @@ async fn assert_owns_account(state: &AppState, profile_id: i64, account_id: &str
         return Err(AppError::NotFound);
     }
     Ok(())
+}
+
+/// Serve a locally-stored AAXC to the press worker over the LAN. Token
+/// in the URL is the only auth — minted by `reconvert_job` for the
+/// duration of one press round-trip, then revoked. AAXC bytes are still
+/// encrypted at this layer; the matching voucher key/iv lives only in
+/// the in-memory press request body, never in this URL.
+async fn serve_internal_aaxc(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> Result<axum::response::Response, AppError> {
+    let path = state
+        .aaxc_tokens
+        .lookup(&token)
+        .await
+        .ok_or(AppError::NotFound)?;
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let len = file
+        .metadata()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?
+        .len();
+    let stream = tokio_util::io::ReaderStream::new(file);
+    let body = axum::body::Body::from_stream(stream);
+    use axum::http::header;
+    use axum::response::IntoResponse;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (header::CONTENT_LENGTH, len.to_string()),
+            // Press uses Range probes for total-size detection. Advertise
+            // support so the Content-Range/Content-Length flow mirrors
+            // what the Audible CDN serves.
+            (header::ACCEPT_RANGES, "bytes".to_string()),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+async fn reconvert_job(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    assert_owns_job(&state, user.id(), id).await?;
+    crate::reconvert::kick_off(state.clone(), id).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn assert_owns_job(state: &AppState, profile_id: i64, job_id: Uuid) -> AppResult<()> {

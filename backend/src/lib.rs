@@ -10,6 +10,7 @@ pub mod press;
 pub mod profile;
 pub mod queue;
 pub mod reconcile;
+pub mod reconvert;
 pub mod routes;
 pub mod sidecar;
 pub mod shim;
@@ -84,6 +85,7 @@ pub async fn run_server() -> anyhow::Result<()> {
         cookie_key,
         queue: Arc::new(std::sync::OnceLock::new()),
         oidc,
+        aaxc_tokens: state::AaxcTokenStore::default(),
     };
 
     let q = queue::Queue::new(state.clone());

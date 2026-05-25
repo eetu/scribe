@@ -241,6 +241,35 @@ impl Queue {
         Some(tx.subscribe())
     }
 
+    // ---- crate-internal forwarders so out-of-queue orchestration paths
+    //      (currently: reconvert) can mutate job state through the same
+    //      DB + broadcast helpers the worker loop uses. Keeps the
+    //      single source of truth for status transitions inside `Inner`.
+
+    pub(crate) async fn set_phase(
+        &self,
+        job_id: Uuid,
+        phase: Lifecycle,
+        retry_count: u32,
+    ) -> Result<(), AppError> {
+        self.inner.set_phase(job_id, phase, retry_count).await
+    }
+
+    pub(crate) async fn save_outcome_done(
+        &self,
+        job_id: Uuid,
+        aaxc: &str,
+        m4b: &str,
+    ) -> Result<(), AppError> {
+        self.inner.save_outcome_done(job_id, aaxc, m4b).await
+    }
+
+    pub(crate) async fn save_failure(&self, job_id: Uuid, msg: &str) {
+        if let Err(e) = self.inner.save_failure(job_id, msg).await {
+            tracing::warn!(%job_id, error = ?e, "save_failure DB write failed");
+        }
+    }
+
     /// Re-queue any non-terminal jobs after a restart. Call once at boot,
     /// after state is constructed and workers are spawned.
     pub async fn resume_pending(&self) -> Result<(), AppError> {
@@ -299,7 +328,7 @@ impl Inner {
         flag.clone()
     }
 
-    async fn set_phase(&self, job_id: Uuid, phase: Lifecycle, retry_count: u32) -> Result<(), AppError> {
+    pub(crate) async fn set_phase(&self, job_id: Uuid, phase: Lifecycle, retry_count: u32) -> Result<(), AppError> {
         let id_s = job_id.to_string();
         let phase_s = phase.as_str().to_string();
         let now = Utc::now().timestamp();
@@ -337,7 +366,7 @@ impl Inner {
         Ok(row)
     }
 
-    async fn save_outcome_done(&self, job_id: Uuid, aaxc: &str, m4b: &str) -> Result<(), AppError> {
+    pub(crate) async fn save_outcome_done(&self, job_id: Uuid, aaxc: &str, m4b: &str) -> Result<(), AppError> {
         let id_s = job_id.to_string();
         let aaxc_s = aaxc.to_string();
         let m4b_s = m4b.to_string();
@@ -360,7 +389,7 @@ impl Inner {
         Ok(())
     }
 
-    async fn save_failure(&self, job_id: Uuid, msg: &str) -> Result<(), AppError> {
+    pub(crate) async fn save_failure(&self, job_id: Uuid, msg: &str) -> Result<(), AppError> {
         let id_s = job_id.to_string();
         let msg_s = msg.to_string();
         let now = Utc::now().timestamp();
