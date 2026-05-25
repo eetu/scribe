@@ -274,10 +274,12 @@ async fn poll_until_terminal(
                 "converting" | "ready" => s.m4b_bytes,
                 _ => s.aaxc_bytes,
             };
-            let bytes_total = match s.phase.as_str() {
-                "converting" | "ready" => None,
-                _ => s.aaxc_bytes_total,
-            };
+            // Press doesn't know the M4B output size mid-convert. Use the
+            // AAXC input size as an approximation — lossless remux keeps
+            // output ≈ input within a few percent, which is close enough
+            // for a UI progress bar. The chip label is what tells the
+            // user which phase we're actually in.
+            let bytes_total = s.aaxc_bytes_total;
             let _ = tx.send(crate::queue::QueueEvent::Progress {
                 phase: s.phase.clone(),
                 bytes_done,

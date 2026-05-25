@@ -17,14 +17,6 @@ const ACTIVE_PHASES = new Set([
   "streaming",
 ]);
 
-const PHASE_ORDER = [
-  "queued",
-  "fetching_voucher",
-  "downloading",
-  "converting",
-  "streaming",
-];
-
 export default function JobRow({ job, book, onCancel }: Props) {
   const theme = useTheme();
   const active = ACTIVE_PHASES.has(job.status);
@@ -43,9 +35,13 @@ export default function JobRow({ job, book, onCancel }: Props) {
     liveProgress?.phase ??
     (ev?.kind === "phase" ? ev.phase : null) ??
     job.status;
-  // Byte-precise progress wins over the phase-bucketed default whenever
-  // the press worker has told us a total.
-  const precise =
+  // Each phase fills 0→100% on its own — chip label tells the user which
+  // phase they're in (downloading vs converting vs streaming). No global
+  // % across phases: we don't actually know the relative weights between
+  // CDN download, ffmpeg remux, and the LAN copy, and inventing them
+  // would just shift the lie. When bytes_total isn't known yet (queued,
+  // fetching_voucher), bar sits at 0 and the chip carries the story.
+  const progress =
     liveProgress && liveProgress.bytes_total
       ? Math.min(
           100,
@@ -53,8 +49,11 @@ export default function JobRow({ job, book, onCancel }: Props) {
             (liveProgress.bytes_done / liveProgress.bytes_total) * 100,
           ),
         )
-      : null;
-  const progress = precise ?? computeProgress(status);
+      : status === "done"
+        ? 100
+        : status === "failed" || status === "cancelled"
+          ? 100
+          : 0;
   const bytesLabel = formatBytesLabel(liveProgress);
 
   return (
@@ -179,13 +178,4 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function computeProgress(phase: string): number {
-  if (phase === "done") return 100;
-  if (phase === "failed") return 100;
-  if (phase === "cancelled") return 100;
-  const idx = PHASE_ORDER.indexOf(phase);
-  if (idx < 0) return 0;
-  return Math.round(((idx + 1) / PHASE_ORDER.length) * 100);
 }
