@@ -173,12 +173,7 @@ async fn run_ffmpeg(
     if let Some(seq) = &req.series_sequence {
         cmd.arg("-metadata").arg(format!("track={seq}"));
     }
-    // Set the major brand to "M4A " (Apple audiobook convention) so
-    // iOS / AVFoundation pickers route the file through the audiobook
-    // decoder path instead of the generic mp4 video one. Plain `-f mp4`
-    // would write `isom`, which some older iOS code paths reject for
-    // direct play even though the codec inside is identical LC AAC.
-    cmd.args(["-f", "mp4", "-brand", "M4A "]).arg(output);
+    cmd.args(["-f", "mp4"]).arg(output);
     cmd.stdout(Stdio::null()).stderr(Stdio::piped()).stdin(Stdio::null());
 
     let mut child = cmd.spawn()?;
