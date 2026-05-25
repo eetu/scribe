@@ -160,7 +160,17 @@ impl<'a> PressClient<'a> {
                 .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
         }
 
-        let mut file = tokio::fs::File::create(dest)
+        // Write to <dest>.partial first, rename to <dest> on success. A
+        // press restart, network blip, or worker crash mid-stream then
+        // leaves only a `.partial` file behind — ABS never scans a
+        // half-written canonical path, and a sweep can identify
+        // abandoned writes by suffix alone.
+        let partial = {
+            let mut p = dest.as_os_str().to_owned();
+            p.push(".partial");
+            std::path::PathBuf::from(p)
+        };
+        let mut file = tokio::fs::File::create(&partial)
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
         let mut stream = resp.bytes_stream();
@@ -197,6 +207,10 @@ impl<'a> PressClient<'a> {
             }
         }
         file.flush()
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+        drop(file);
+        tokio::fs::rename(&partial, dest)
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
         if let Some((tx, phase)) = progress {
