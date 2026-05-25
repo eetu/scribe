@@ -69,8 +69,16 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
             let asin = asin.clone();
             let account = account.clone();
             move |c| {
+                // Any existing job row blocks insert — including failed or
+                // cancelled ones. A failed-state row means something
+                // notable happened (license denial, ffmpeg error, manual
+                // intervention) and silently replacing it with a fresh
+                // "done" row from a stale sidecar would erase that
+                // signal. Real DB-wipe recovery starts from zero rows
+                // anyway, so this stays correct for the originally
+                // intended use case.
                 c.query_row(
-                    "SELECT COUNT(*) FROM jobs WHERE asin = ?1 AND account_id = ?2 AND status = 'done'",
+                    "SELECT COUNT(*) FROM jobs WHERE asin = ?1 AND account_id = ?2",
                     rusqlite::params![asin, account],
                     |r| r.get(0),
                 )

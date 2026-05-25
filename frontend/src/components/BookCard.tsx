@@ -246,11 +246,16 @@ function jobStatus(job: Job | null): {
     // help, so flag the chip distinctly and keep canEnqueue off — user
     // can still force-retry manually but we don't lure them into it.
     const denied = job.error?.toLowerCase().startsWith("license denied");
+    // If the encrypted source is still cached, offer a reconvert as a
+    // recovery path. Cheaper than a fresh CDN round-trip and works for
+    // generic ffmpeg / network failures. License-denied books skip this
+    // unless the sidecar already has a stored voucher — the reconvert
+    // path will short-circuit on its own if the lazy shim fetch fails.
     return {
       label: denied ? "unavailable" : "failed",
       tone: "err",
       canEnqueue: !denied,
-      canReconvert: false,
+      canReconvert: job.aaxc_present && !denied,
       tooltip: job.error ?? undefined,
     };
   }
