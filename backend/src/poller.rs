@@ -25,9 +25,21 @@ use std::time::Duration;
 use chrono::{Local, Timelike};
 use rand::Rng;
 
+use crate::error::AppError;
 use crate::profile;
+use crate::shim::ShimClient;
+use crate::sidecar;
 use crate::state::AppState;
 use crate::sync;
+
+/// How many done-job sidecars to backfill per tick. Kept tiny so the
+/// opportunistic voucher catch-up doesn't look like a scraper sweep —
+/// at 2/tick × ~60min jitter, ~100 books take 24-48h to cover.
+const VOUCHER_BACKFILL_PER_TICK: usize = 2;
+/// Cooldown for a sidecar whose previous voucher fetch came back 410.
+/// Revoked titles don't come back; recheck weekly just in case Audible
+/// reissues a license.
+const VOUCHER_RETRY_COOLDOWN_S: i64 = 7 * 24 * 3600;
 
 pub fn spawn(state: AppState) {
     tokio::spawn(async move { run(state).await });
@@ -107,7 +119,119 @@ async fn tick(state: &AppState) -> anyhow::Result<()> {
             Err(e) => tracing::warn!(account = %acct, error = ?e, "sync failed"),
         }
     }
+    backfill_vouchers(state).await;
     Ok(())
+}
+
+/// Opportunistic voucher backfill — fetch keys for legacy sidecars that
+/// pre-date the persistence feature. Capped per tick to stay invisible.
+async fn backfill_vouchers(state: &AppState) {
+    let candidates = match find_sidecars_needing_voucher(state, VOUCHER_BACKFILL_PER_TICK).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::debug!(error = ?e, "voucher backfill scan failed");
+            return;
+        }
+    };
+    if candidates.is_empty() {
+        return;
+    }
+    let shim = ShimClient::new(state);
+    let now = chrono::Utc::now().timestamp();
+    for (aaxc_path, account_id, asin) in candidates {
+        match shim.voucher(&account_id, &asin).await {
+            Ok(v) => {
+                if let Err(e) = stamp_voucher(&aaxc_path, |sc| {
+                    sc.voucher_key_hex = Some(v.key.clone());
+                    sc.voucher_iv_hex = Some(v.iv.clone());
+                    sc.voucher_attempt_at = None;
+                })
+                .await
+                {
+                    tracing::warn!(asin = %asin, error = ?e, "sidecar voucher write failed");
+                } else {
+                    tracing::info!(asin = %asin, "voucher backfilled");
+                }
+            }
+            Err(AppError::LicenseDenied(_)) => {
+                if let Err(e) = stamp_voucher(&aaxc_path, |sc| {
+                    sc.voucher_attempt_at = Some(now);
+                })
+                .await
+                {
+                    tracing::warn!(asin = %asin, error = ?e, "sidecar attempt stamp failed");
+                } else {
+                    tracing::debug!(asin = %asin, "voucher backfill denied, cooldown set");
+                }
+            }
+            Err(e) => {
+                tracing::debug!(asin = %asin, error = ?e, "voucher backfill transient error");
+            }
+        }
+    }
+}
+
+async fn stamp_voucher<F>(aaxc_path: &str, mutate: F) -> Result<(), AppError>
+where
+    F: FnOnce(&mut scribe_shared::Sidecar),
+{
+    let path = sidecar::sidecar_path_for(std::path::Path::new(aaxc_path));
+    let mut sc = sidecar::read(&path).await?;
+    mutate(&mut sc);
+    sidecar::write(std::path::Path::new(aaxc_path), &sc).await
+}
+
+async fn find_sidecars_needing_voucher(
+    state: &AppState,
+    limit: usize,
+) -> Result<Vec<(String, String, String)>, AppError> {
+    // Pull recent done-jobs that recorded an AAXC path. Filtering for
+    // "needs voucher" happens after the file read — cheaper than
+    // walking the originals tree blind, and the DB already knows the
+    // accountship + asin for free.
+    let rows: Vec<(String, String, String)> = state
+        .db
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT aaxc_path, account_id, asin
+                 FROM jobs
+                 WHERE status = 'done' AND aaxc_path IS NOT NULL
+                 ORDER BY updated_at DESC",
+            )?;
+            let collected = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(collected)
+        })
+        .await?;
+    let now = chrono::Utc::now().timestamp();
+    let mut out = Vec::new();
+    for (aaxc_path, account_id, asin) in rows {
+        if out.len() >= limit {
+            break;
+        }
+        let sc_path = sidecar::sidecar_path_for(std::path::Path::new(&aaxc_path));
+        let sc = match sidecar::read(&sc_path).await {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if sc.voucher_key_hex.is_some() {
+            continue;
+        }
+        if let Some(prev) = sc.voucher_attempt_at {
+            if now - prev < VOUCHER_RETRY_COOLDOWN_S {
+                continue;
+            }
+        }
+        out.push((aaxc_path, account_id, asin));
+    }
+    Ok(out)
 }
 
 async fn auto_enqueue_for(state: &AppState, profile_id: i64) -> bool {

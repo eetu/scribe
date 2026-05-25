@@ -150,6 +150,7 @@ pub async fn run(
         voucher_key_hex,
         voucher_iv_hex,
         activation_bytes_hex,
+        voucher_attempt_at: None,
     };
     if let Err(e) = crate::sidecar::write(&aaxc_path, &sc).await {
         tracing::warn!(asin = %input.asin, error = ?e, "sidecar write failed");

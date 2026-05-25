@@ -94,6 +94,12 @@ pub struct Sidecar {
     /// downloads so the same reconvert path works for that family.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub activation_bytes_hex: Option<String>,
+    /// Unix timestamp of the last opportunistic voucher backfill attempt
+    /// that came back with a non-recoverable error (Audible 410 license
+    /// denied). Lets the poller skip known-dead titles for a cooldown
+    /// window instead of hammering shim on every tick.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub voucher_attempt_at: Option<i64>,
 }
 
 fn default_version() -> String {
