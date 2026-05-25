@@ -81,6 +81,19 @@ pub struct Sidecar {
     pub customer_name: Option<String>,
     #[serde(default = "default_version")]
     pub scribe_version: String,
+    /// Audible AAXC voucher key (hex). Stored so a future reconvert from
+    /// the local AAXC works even if Audible later revokes the title's
+    /// license (Plus catalog rotation, cross-region drift). Same threat
+    /// model as the AAXC bytes living on the same disk — anyone who can
+    /// read the file can already decrypt with these.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub voucher_key_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub voucher_iv_hex: Option<String>,
+    /// AAX account-wide activation bytes (hex). Set only on AAX-format
+    /// downloads so the same reconvert path works for that family.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub activation_bytes_hex: Option<String>,
 }
 
 fn default_version() -> String {

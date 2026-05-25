@@ -55,6 +55,17 @@ pub async fn run(
     // 1. resolve content URL + DRM
     let src = resolve_source(&shim, &input).await?;
 
+    // Cache the voucher / activation bytes before they move into the
+    // press job request — needed later for the sidecar so a future
+    // reconvert can decrypt the local AAXC without re-fetching from
+    // Audible (Plus revocations etc).
+    let (voucher_key_hex, voucher_iv_hex, activation_bytes_hex) = match &src.drm {
+        PressDrm::Aaxc { key_hex, iv_hex } => {
+            (Some(key_hex.clone()), Some(iv_hex.clone()), None)
+        }
+        PressDrm::Aax { activation_bytes } => (None, None, Some(activation_bytes.clone())),
+    };
+
     // 2. submit to press
     let job_req = PressJobReq {
         content_url: src.content_url,
@@ -123,6 +134,9 @@ pub async fn run(
     tracing::info!(%press_job_id, %m4b_bytes, path = %m4b_path.display(), "M4B written");
 
     // 6. write `.scribe.json` sidecar next to the AAXC — survives a DB wipe.
+    // Persisted voucher/activation bytes (cached pre-move above) make a
+    // future reconvert work even if Audible later revokes the title's
+    // license.
     let sc = scribe_shared::Sidecar {
         asin: input.asin.clone(),
         account_id: input.account_id.clone(),
@@ -133,6 +147,9 @@ pub async fn run(
         voucher_refresh_date: None,
         customer_name: None,
         scribe_version: env!("CARGO_PKG_VERSION").into(),
+        voucher_key_hex,
+        voucher_iv_hex,
+        activation_bytes_hex,
     };
     if let Err(e) = crate::sidecar::write(&aaxc_path, &sc).await {
         tracing::warn!(asin = %input.asin, error = ?e, "sidecar write failed");
