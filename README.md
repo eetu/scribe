@@ -87,8 +87,6 @@ Pi never holds either full file in RAM. Mini holds both briefly on SSD.
 
 ## Quick start
 
-(Scaffold stage — most of this is stub. Run targets fill in as tasks complete.)
-
 ```sh
 # Pi side
 cd backend && cargo run
@@ -103,7 +101,71 @@ cd shim && uv sync && uv run shim
 cd frontend && yarn install && yarn dev
 ```
 
+## Deployment requirements (raspi)
+
+scribe ships via the [raspi IaC](../raspi) tasks `scribe.py` + `scribe_shim.py`.
+The container itself is straightforward; a few env vars + one firewall hole
+have surprised redeploys when they were missing.
+
+### Environment
+
+`group_data/all.py` → `SCRIBE.env`:
+
+| Var | Required | Notes |
+|---|---|---|
+| `SCRIBE_BIND` | for reconvert | Must be `0.0.0.0:3003`, not the loopback default. Press on mini fetches `/internal/aaxc/{token}` over the LAN; loopback bind blocks that. Traefik still routes public traffic through 127.0.0.1, which 0.0.0.0 naturally includes. |
+| `SCRIBE_PRESS_URL` | yes | LAN URL of the mini-side press worker (`http://<mini>:3005`). |
+| `SCRIBE_INTERNAL_URL` | for reconvert | LAN URL of *this* scribe instance from press's POV (`http://<raspi-lan-ip>:3003`). Used to mint one-shot `/internal/aaxc/{token}` URLs. Unset = reconvert disabled, downloads still work. |
+| `SCRIBE_LIBRARY_DIR` | yes | Canonical M4B output root. ABS scans this. |
+| `SCRIBE_ORIGINAL_DIR` | yes | Encrypted AAXC + sidecar JSON tree. ABS does **not** scan this. |
+| `SCRIBE_AUTO_ENQUEUE` | optional | `1` auto-queues new purchases on poll; `0` is manual-only. |
+| `OIDC_*` | for kanidm | Discovery + client secret + redirect URL. `DEV_AUTH=1` short-circuits for local. |
+
+`secret_env`:
+
+- `SCRIBE_PRESS_TOKEN` — bearer shared with mini's `scribe-press` (`api_key` field).
+- `ABS_TOKEN` — audiobookshelf API token, lets scribe trigger a rescan after each job.
+
+### Firewall
+
+UFW on the Pi defaults to deny incoming. Reconvert requires the mini to reach
+scribe directly on port 3003 (the `/internal/aaxc/{token}` route). Open it
+scoped to the mini IP:
+
+```sh
+sudo ufw allow from <mini-lan-ip> to any port 3003 proto tcp comment 'scribe reconvert from mini'
+```
+
+The Pi-side `tasks/hardening.py` doesn't ship this rule yet — add it there
+when you fold mini → raspi into the IaC checklist.
+
+### NAS layout
+
+`SCRIBE_LIBRARY_DIR` and `SCRIBE_ORIGINAL_DIR` should be **separate trees**:
+
+- `…/audible/books/` — canonical `Author/Series/#N - Title/Title.m4b`, ABS root.
+- `…/audible/originals/` — `Author/Series/Title-ASIN.aaxc` + `Title-ASIN.aaxc.scribe.json`.
+
+The sidecar JSON is the source of truth that survives a DB wipe. It also
+carries the AAXC voucher key + iv (since the reconvert feature) so a future
+re-conversion can happen entirely from local files, even after Audible
+revokes the title's license.
+
+### Reconvert plumbing
+
+When an m4b on the NAS goes missing (manual delete, ABS purge), the library
+page flips the chip to `missing` and surfaces a `re-convert` button:
+
+1. Backend mints a one-shot token, registers `(token → aaxc_path)`.
+2. Submits a normal press job with `content_url = ${SCRIBE_INTERNAL_URL}/internal/aaxc/<token>`.
+3. Press fetches the AAXC over LAN like any CDN URL, runs ffmpeg, stages M4B.
+4. Backend streams the M4B back into the canonical path, atomic-renames `.partial → final`, revokes the token.
+
+The flow has no extra press-side dependency — press treats the scribe URL as
+just another `content_url`. The only deployment-side requirements are the
+`SCRIBE_BIND`, `SCRIBE_INTERNAL_URL`, and UFW rule above.
+
 ## Status
 
-Early scaffold. See task list in conversation history. Smoke test on a real
-account is the milestone that unblocks rollout.
+Reconvert end-to-end works. OA-style file importer (drop a local AAX into
+scribe and have it appear in the library) is the next big gap.
