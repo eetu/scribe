@@ -81,8 +81,14 @@ async fn download_http(state: &Arc<Mutex<JobState>>, url: &str, dest: &std::path
     let client = reqwest::Client::builder()
         .user_agent("Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0")
         .build()?;
+    // Audible's CDN sometimes returns chunked responses without a
+    // Content-Length header, which leaves the UI without a total and the
+    // progress bar at 0%. Probe with a single-byte Range request first —
+    // the 206 response carries `Content-Range: bytes 0-0/<total>` which
+    // works reliably across the books that don't expose Content-Length.
+    let total = probe_total(&client, url).await;
     let resp = client.get(url).send().await?.error_for_status()?;
-    let total = resp.content_length();
+    let total = total.or_else(|| resp.content_length());
     {
         // Stash the total so /jobs/{id} status can surface it for the
         // backend's progress polling — broadcast events go to subscribers
@@ -107,6 +113,25 @@ async fn download_http(state: &Arc<Mutex<JobState>>, url: &str, dest: &std::path
     }
     file.flush().await?;
     Ok(bytes_done)
+}
+
+async fn probe_total(client: &reqwest::Client, url: &str) -> Option<u64> {
+    let resp = client
+        .get(url)
+        .header(reqwest::header::RANGE, "bytes=0-0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let cr = resp
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)?
+        .to_str()
+        .ok()?;
+    // `bytes 0-0/12345678` → take the trailing total.
+    cr.rsplit('/').next().and_then(|s| s.parse::<u64>().ok())
 }
 
 async fn run_ffmpeg(
@@ -163,7 +188,30 @@ async fn run_ffmpeg(
         })
     });
 
+    // Poll the output file size while ffmpeg writes. Without this the
+    // UI sees m4b_bytes=0 for the whole convert phase then a single jump
+    // to full size at the end — bar pinned at 0% the entire time.
+    let progress_state = state.clone();
+    let progress_path = output.to_path_buf();
+    let progress = tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            let Ok(meta) = tokio::fs::metadata(&progress_path).await else {
+                continue;
+            };
+            let bytes = meta.len();
+            let mut s = progress_state.lock().await;
+            if !matches!(s.phase, Phase::Converting) {
+                break;
+            }
+            s.m4b_bytes = bytes;
+        }
+    });
+
     let status = child.wait().await?;
+    progress.abort();
     let stderr = match stderr_handle {
         Some(h) => h.await.unwrap_or_default(),
         None => String::new(),
