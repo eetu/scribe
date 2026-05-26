@@ -154,7 +154,28 @@ async fn run_ffmpeg(
     }
 
     cmd.arg("-i").arg(input);
-    cmd.args(["-c", "copy", "-movflags", "+faststart"]);
+    // ffmpeg's `+faststart` rewrite of an AAX-decoded stream produces
+    // a moov atom AVFoundation rejects at playback time (asset parses,
+    // duration loads, then AVPlayer immediately pauses). The exact
+    // delta is somewhere inside the rewritten moov — same audio
+    // samples, same codec params, but reorder bugs AVFoundation cares
+    // about. Re-confirmed by comparing scribe rescues against the
+    // OpenAudible ffmpeg outputs of the same source: OA keeps moov at
+    // the end and plays cleanly on iOS / macOS QuickTime. AAXC output
+    // doesn't trip the same bug, so keep faststart there for HTTP
+    // streaming friendliness.
+    cmd.args(["-c", "copy"]);
+    let mp4_format = match &req.drm {
+        Drm::Aax { .. } => {
+            // Leave moov at the end. No faststart rewrite, no extra
+            // muxer surgery. Matches the working OA output shape.
+            "mp4"
+        }
+        Drm::Aaxc { .. } => {
+            cmd.args(["-movflags", "+faststart"]);
+            "mp4"
+        }
+    };
     cmd.arg("-metadata").arg(format!("title={}", req.title));
     cmd.arg("-metadata").arg(format!("artist={}", req.authors.join(", ")));
     cmd.arg("-metadata").arg(format!("album_artist={}", req.authors.join(", ")));
@@ -173,7 +194,7 @@ async fn run_ffmpeg(
     if let Some(seq) = &req.series_sequence {
         cmd.arg("-metadata").arg(format!("track={seq}"));
     }
-    cmd.args(["-f", "mp4"]).arg(output);
+    cmd.args(["-f", mp4_format]).arg(output);
     cmd.stdout(Stdio::null()).stderr(Stdio::piped()).stdin(Stdio::null());
 
     let mut child = cmd.spawn()?;
