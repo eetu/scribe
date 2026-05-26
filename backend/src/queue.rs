@@ -270,6 +270,10 @@ impl Queue {
         }
     }
 
+    pub(crate) async fn broadcaster(&self, job_id: Uuid) -> broadcast::Sender<QueueEvent> {
+        self.inner.channel(job_id).await
+    }
+
     /// Re-queue any non-terminal jobs after a restart. Call once at boot,
     /// after state is constructed and workers are spawned.
     pub async fn resume_pending(&self) -> Result<(), AppError> {

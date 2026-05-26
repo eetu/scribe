@@ -131,11 +131,11 @@ async fn run(
     let press_job_id = press.submit(&job_req).await?;
     tracing::info!(%press_job_id, %asin, "reconvert press job submitted");
 
-    // Byte-level progress during reconvert would require a public
-    // broadcaster on Queue; for v1 we lean on the coarse Phase
-    // transitions (Downloading → Streaming → Done) — enough to drive
-    // the UI chip, just no live byte counter.
-    poll_until_ready(&press, press_job_id).await?;
+    // Reuse the same per-job broadcast channel SSE consumers are
+    // already subscribed to so the UI sees byte-level progress just
+    // like a fresh download.
+    let progress_tx = state.queue().broadcaster(job_id).await;
+    poll_until_ready(&press, press_job_id, &progress_tx).await?;
 
     // Stream the m4b back into the existing canonical path. Reuse
     // PressClient::stream_to_file which already handles partial-file
@@ -147,7 +147,12 @@ async fn run(
     let m4b_path = current_m4b_path(state, job_id).await?;
     let dest = std::path::Path::new(&m4b_path);
     press
-        .stream_to_file(press_job_id, Artifact::M4b, dest, None)
+        .stream_to_file(
+            press_job_id,
+            Artifact::M4b,
+            dest,
+            Some((&progress_tx, "streaming")),
+        )
         .await?;
 
     // Cleanup. Token revocation happens automatically via TokenGuard
@@ -317,10 +322,27 @@ async fn current_m4b_path(state: &AppState, job_id: Uuid) -> Result<String, AppE
         .ok_or_else(|| AppError::BadRequest("job has no m4b_path".into()))
 }
 
-async fn poll_until_ready(press: &PressClient<'_>, job_id: Uuid) -> Result<(), AppError> {
+async fn poll_until_ready(
+    press: &PressClient<'_>,
+    job_id: Uuid,
+    progress_tx: &tokio::sync::broadcast::Sender<crate::queue::QueueEvent>,
+) -> Result<(), AppError> {
     let mut sleep = Duration::from_millis(500);
     loop {
         let s = press.status(job_id).await?;
+        // Mirror pipeline.rs: emit Progress every poll so the UI gets a
+        // live byte counter through download + convert. m4b_bytes climb
+        // tracks convert progress; aaxc_bytes covers the prior phase.
+        let bytes_done = match s.phase.as_str() {
+            "converting" | "ready" => s.m4b_bytes,
+            _ => s.aaxc_bytes,
+        };
+        let bytes_total = s.aaxc_bytes_total;
+        let _ = progress_tx.send(crate::queue::QueueEvent::Progress {
+            phase: s.phase.clone(),
+            bytes_done,
+            bytes_total,
+        });
         match s.phase.as_str() {
             "ready" => return Ok(()),
             "failed" => {
