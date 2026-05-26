@@ -35,24 +35,6 @@ pub async fn run(state: Arc<Mutex<JobState>>, ffmpeg_bin: String) -> anyhow::Res
     set_phase(&state, Phase::Converting).await;
     run_ffmpeg(&state, &ffmpeg_bin, &aaxc_path, &m4b_path, &req).await?;
 
-    // AAX post-process: ffmpeg -c copy bakes a single-entry stts that
-    // overstates the trailing AAC sample's duration (every frame
-    // declared as 1024 samples even though AAX's last frame is
-    // shorter). AVFoundation rejects on play. Patch mdhd/tkhd/elst
-    // durations + stts in place using the source AAX's true sample
-    // count. AAXC files aren't affected.
-    if matches!(req.drm, Drm::Aax { .. }) {
-        let aax_for_patch = aaxc_path.clone();
-        let m4b_for_patch = m4b_path.clone();
-        let patch_result = tokio::task::spawn_blocking(move || {
-            crate::mp4patch::fix_aax_durations(&aax_for_patch, &m4b_for_patch)
-        })
-        .await?;
-        if let Err(e) = patch_result {
-            tracing::warn!(%id, error = ?e, "mp4patch failed — m4b kept as-is, may not play on AVFoundation");
-        }
-    }
-
     let m4b_bytes = tokio::fs::metadata(&m4b_path).await?.len();
     {
         let mut s = state.lock().await;
@@ -168,16 +150,6 @@ async fn run_ffmpeg(
         }
         Drm::Aax { activation_bytes } => {
             cmd.args(["-activation_bytes", activation_bytes]);
-            // Default mp4 demuxer (advanced_editlist=1) is known-broken for
-            // priming/trailing edit-list handling: extra samples leak past
-            // the elst cap into the packet stream instead of being applied
-            // as skip-samples side data. With `-c copy` downstream that
-            // surfaces as an overstated stts and an output elst that no
-            // longer truncates — AVFoundation then refuses to play. Forcing
-            // advanced_editlist=0 falls back to the legacy path that
-            // *does* honour the source edit list as a true sample cap.
-            // Ref: FFmpeg patchwork RFC 20221228162844 (Buitenhuis, 2022).
-            cmd.args(["-advanced_editlist", "0"]);
         }
     }
 
@@ -199,14 +171,7 @@ async fn run_ffmpeg(
     //   stock ffmpeg's AAC decoder rejects Audible's older AAC with
     //   "Reserved bit set" / "ms_present = 3 is reserved" / scalable
     //   AOT extension bits in every frame, so the whole pipeline
-    //   collapses. -c copy preserves audio bytes but ffmpeg's mp4
-    //   muxer writes a single-entry stts (asserts every frame is 1024
-    //   samples — incorrect for the trailing partial frame). The
-    //   resulting m4b parses but AVFoundation rejects on play. The
-    //   stts gets patched post-hoc by the scribe-press job runner
-    //   reading mdat sample sizes and computing the actual last
-    //   sample_duration; that step is non-destructive and only touches
-    //   one atom.
+    //   collapses. -c copy preserves the audio bytes verbatim.
     cmd.args(["-c", "copy"]);
     let mp4_format = match &req.drm {
         Drm::Aax { .. } => "ipod",
