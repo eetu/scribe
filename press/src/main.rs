@@ -6,6 +6,7 @@ mod auth;
 mod config;
 mod ffmpeg;
 mod jobs;
+mod mp4patch;
 mod routes;
 mod state;
 

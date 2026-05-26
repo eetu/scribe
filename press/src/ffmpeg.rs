@@ -35,6 +35,24 @@ pub async fn run(state: Arc<Mutex<JobState>>, ffmpeg_bin: String) -> anyhow::Res
     set_phase(&state, Phase::Converting).await;
     run_ffmpeg(&state, &ffmpeg_bin, &aaxc_path, &m4b_path, &req).await?;
 
+    // AAX post-process: ffmpeg -c copy bakes a single-entry stts that
+    // overstates the trailing AAC sample's duration (every frame
+    // declared as 1024 samples even though AAX's last frame is
+    // shorter). AVFoundation rejects on play. Patch mdhd/tkhd/elst
+    // durations + stts in place using the source AAX's true sample
+    // count. AAXC files aren't affected.
+    if matches!(req.drm, Drm::Aax { .. }) {
+        let aax_for_patch = aaxc_path.clone();
+        let m4b_for_patch = m4b_path.clone();
+        let patch_result = tokio::task::spawn_blocking(move || {
+            crate::mp4patch::fix_aax_durations(&aax_for_patch, &m4b_for_patch)
+        })
+        .await?;
+        if let Err(e) = patch_result {
+            tracing::warn!(%id, error = ?e, "mp4patch failed — m4b kept as-is, may not play on AVFoundation");
+        }
+    }
+
     let m4b_bytes = tokio::fs::metadata(&m4b_path).await?.len();
     {
         let mut s = state.lock().await;
