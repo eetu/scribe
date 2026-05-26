@@ -353,7 +353,8 @@ async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppRe
         .db
         .with(move |c| {
             let mut stmt = c.prepare(
-                "SELECT b.asin, b.account_id, b.title, b.authors_json, b.cover_url, b.status, b.purchase_date
+                "SELECT b.asin, b.account_id, b.title, b.authors_json, b.cover_url,
+                        b.status, b.purchase_date, a.locale
                  FROM books b
                  JOIN accounts a ON a.id = b.account_id
                  WHERE a.profile_id = ?1
@@ -369,6 +370,11 @@ async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppRe
                         "cover_url": r.get::<_, Option<String>>(4)?,
                         "status": r.get::<_, String>(5)?,
                         "purchase_date": r.get::<_, Option<String>>(6)?,
+                        // Region pulled from the owning account so the
+                        // UI can render a per-book badge without a
+                        // separate accounts lookup. Same join we already
+                        // need for profile-scoping; near-zero cost.
+                        "region": r.get::<_, Option<String>>(7)?,
                     }))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

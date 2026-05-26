@@ -113,11 +113,6 @@ function LibraryPage() {
     if (peers.length > 0) dupesByAsin.set(b.asin, peers);
   }
 
-  const localeByAccount = new Map<string, string | null>();
-  for (const a of accounts ?? []) {
-    localeByAccount.set(a.account_id, a.locale);
-  }
-
   const buckets = new Map<string, Exclude<FilterKey, "all">>();
   for (const b of items) {
     buckets.set(b.asin, bucket(jobByAsin.get(b.asin) ?? null));
@@ -316,7 +311,7 @@ function LibraryPage() {
             book={b}
             job={jobByAsin.get(b.asin) ?? null}
             duplicateOf={dupesByAsin.get(b.asin)}
-            region={localeByAccount.get(b.account_id) ?? null}
+            region={b.region}
             onDownload={async () => {
               await api.enqueueJob({ account_id: b.account_id, asin: b.asin });
               mutate("/api/jobs");

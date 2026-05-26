@@ -51,6 +51,9 @@ export type Book = {
   cover_url: string | null;
   status: string;
   purchase_date: string | null;
+  /** Marketplace locale of the owning account ("us", "uk", …). null
+   * when scribe predates the join — UI renders no badge in that case. */
+  region: string | null;
 };
 
 export type Job = {
