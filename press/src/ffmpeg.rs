@@ -168,6 +168,16 @@ async fn run_ffmpeg(
         }
         Drm::Aax { activation_bytes } => {
             cmd.args(["-activation_bytes", activation_bytes]);
+            // Default mp4 demuxer (advanced_editlist=1) is known-broken for
+            // priming/trailing edit-list handling: extra samples leak past
+            // the elst cap into the packet stream instead of being applied
+            // as skip-samples side data. With `-c copy` downstream that
+            // surfaces as an overstated stts and an output elst that no
+            // longer truncates — AVFoundation then refuses to play. Forcing
+            // advanced_editlist=0 falls back to the legacy path that
+            // *does* honour the source edit list as a true sample cap.
+            // Ref: FFmpeg patchwork RFC 20221228162844 (Buitenhuis, 2022).
+            cmd.args(["-advanced_editlist", "0"]);
         }
     }
 
