@@ -322,6 +322,17 @@ function LibraryPage() {
               await api.reconvertJob(j.id);
               mutate("/api/jobs");
             }}
+            onRemove={async () => {
+              if (
+                !confirm(
+                  `remove "${b.title}" from scribe?\n\nthe library and source files stay on disk — only scribe's record is removed. it won't come back unless you re-buy it on audible.`,
+                )
+              )
+                return;
+              await api.removeBook(b.asin);
+              mutate("/api/library");
+              mutate("/api/jobs");
+            }}
           />
         ))}
       </div>

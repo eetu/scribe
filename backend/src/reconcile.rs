@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
 use crate::sidecar;
@@ -24,8 +25,15 @@ use crate::state::AppState;
 pub struct ReconcileReport {
     pub sidecars_seen: usize,
     pub jobs_inserted: usize,
+    pub jobs_promoted: usize,
     pub jobs_already: usize,
     pub errors: usize,
+}
+
+enum Outcome {
+    Inserted,
+    Promoted,
+    Already,
 }
 
 pub async fn scan(state: &AppState) -> anyhow::Result<ReconcileReport> {
@@ -39,8 +47,9 @@ pub async fn scan(state: &AppState) -> anyhow::Result<ReconcileReport> {
     for path in paths {
         report.sidecars_seen += 1;
         match reconcile_one(state, &path).await {
-            Ok(true) => report.jobs_inserted += 1,
-            Ok(false) => report.jobs_already += 1,
+            Ok(Outcome::Inserted) => report.jobs_inserted += 1,
+            Ok(Outcome::Promoted) => report.jobs_promoted += 1,
+            Ok(Outcome::Already) => report.jobs_already += 1,
             Err(e) => {
                 report.errors += 1;
                 tracing::warn!(path = %path.display(), error = ?e, "reconcile failed");
@@ -51,6 +60,7 @@ pub async fn scan(state: &AppState) -> anyhow::Result<ReconcileReport> {
         tracing::info!(
             seen = report.sidecars_seen,
             inserted = report.jobs_inserted,
+            promoted = report.jobs_promoted,
             already = report.jobs_already,
             errors = report.errors,
             "reconcile pass complete"
@@ -59,24 +69,48 @@ pub async fn scan(state: &AppState) -> anyhow::Result<ReconcileReport> {
     Ok(report)
 }
 
-async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<bool> {
+async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<Outcome> {
     let sc = sidecar::read(sidecar_path).await?;
     let asin = sc.asin.clone();
     let account = sc.account_id.clone();
+    let m4b = sc.m4b_path.clone();
+    let aaxc = sc.aaxc_path.clone();
+
+    // Tombstoned by an explicit user removal — the leftover sidecar must
+    // not resurrect the book. The audio + voucher files are intentionally
+    // left on disk; only scribe's tracking was removed.
+    let tombstoned: bool = state
+        .db
+        .with({
+            let asin = asin.clone();
+            let account = account.clone();
+            move |c| {
+                c.query_row(
+                    "SELECT 1 FROM removed_books WHERE asin = ?1 AND account_id = ?2",
+                    rusqlite::params![asin, account],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map(|o| o.is_some())
+            }
+        })
+        .await?;
+    if tombstoned {
+        return Ok(Outcome::Already);
+    }
+
+    // Physical presence of the library m4b is ground truth: if the file
+    // is on disk the book is playable regardless of how it got there
+    // (normal convert, or a hand-placed copy — e.g. an OpenAudible
+    // rescue of a title Audible has since revoked the voucher for).
+    let m4b_present = tokio::fs::try_exists(&m4b).await.unwrap_or(false);
+
     let exists: i64 = state
         .db
         .with({
             let asin = asin.clone();
             let account = account.clone();
             move |c| {
-                // Any existing job row blocks insert — including failed or
-                // cancelled ones. A failed-state row means something
-                // notable happened (license denial, ffmpeg error, manual
-                // intervention) and silently replacing it with a fresh
-                // "done" row from a stale sidecar would erase that
-                // signal. Real DB-wipe recovery starts from zero rows
-                // anyway, so this stays correct for the originally
-                // intended use case.
                 c.query_row(
                     "SELECT COUNT(*) FROM jobs WHERE asin = ?1 AND account_id = ?2",
                     rusqlite::params![asin, account],
@@ -85,14 +119,44 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
             }
         })
         .await?;
+
     if exists > 0 {
-        return Ok(false);
+        // A row already exists. Normally we leave it — a failed/cancelled
+        // status encodes a real signal (license denial, ffmpeg error)
+        // that a stale sidecar shouldn't silently overwrite. The one
+        // exception is when the m4b is physically present: the file
+        // existing *is* the resolution, so promote any non-done row to
+        // done (covers dropping a working copy into the library by hand).
+        if !m4b_present {
+            return Ok(Outcome::Already);
+        }
+        let now = Utc::now().timestamp();
+        let promoted = state
+            .db
+            .with({
+                let asin = asin.clone();
+                let account = account.clone();
+                let m4b = m4b.clone();
+                let aaxc = aaxc.clone();
+                move |c| {
+                    c.execute(
+                        "UPDATE jobs SET status = 'done', m4b_path = ?3, aaxc_path = ?4, updated_at = ?5
+                         WHERE asin = ?1 AND account_id = ?2 AND status != 'done'",
+                        rusqlite::params![asin, account, m4b, aaxc, now],
+                    )
+                }
+            })
+            .await?;
+        return Ok(if promoted > 0 {
+            Outcome::Promoted
+        } else {
+            Outcome::Already
+        });
     }
+
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().timestamp();
     let downloaded_at = sc.downloaded_at;
-    let m4b = sc.m4b_path.clone();
-    let aaxc = sc.aaxc_path.clone();
     state
         .db
         .with(move |c| {
@@ -104,7 +168,7 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
             Ok(())
         })
         .await?;
-    Ok(true)
+    Ok(Outcome::Inserted)
 }
 
 fn walk_sidecars(root: &Path) -> std::io::Result<Vec<PathBuf>> {

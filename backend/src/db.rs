@@ -18,7 +18,7 @@ pub struct Db {
 /// Current schema version. Bump + add a migration block when shipping
 /// a schema change to a deployed instance. Anything from `0` is a fresh
 /// install and runs the full `SCHEMA` batch.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 impl Db {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
@@ -60,6 +60,9 @@ impl Db {
                     }
                 }
             }
+        }
+        if current < 3 {
+            conn.execute_batch(MIGRATION_V3)?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -124,4 +127,27 @@ CREATE TABLE jobs (
 );
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_account ON jobs(account_id);
+
+CREATE TABLE removed_books (
+  asin TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  removed_at INTEGER NOT NULL,
+  PRIMARY KEY (asin, account_id)
+);
+"#;
+
+// Tombstone for user-removed books. Distinct from a deleted books row:
+// the row is gone, but a leftover `*.scribe.json` sidecar (which we keep
+// on disk because it holds the durable voucher) would otherwise let the
+// boot reconcile pass resurrect the job. Reconcile consults this table
+// and skips tombstoned asins. Library sync deliberately does NOT — if
+// Audible lists the title again (a genuine re-purchase) the tombstone is
+// cleared in `sync::upsert` and the book returns.
+const MIGRATION_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS removed_books (
+  asin TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  removed_at INTEGER NOT NULL,
+  PRIMARY KEY (asin, account_id)
+);
 "#;

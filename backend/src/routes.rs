@@ -46,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/library", get(list_library))
         .route("/api/library/sync", post(sync_library))
         .route("/api/library/reconcile", post(reconcile_route))
+        .route("/api/books/{asin}", delete(remove_book))
         .route("/api/jobs", get(list_jobs).post(enqueue_job))
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
@@ -592,8 +593,60 @@ async fn reconcile_route(_user: AuthProfile, State(state): State<AppState>) -> A
     Ok(Json(json!({
         "sidecars_seen": report.sidecars_seen,
         "jobs_inserted": report.jobs_inserted,
+        "jobs_promoted": report.jobs_promoted,
         "jobs_already": report.jobs_already,
         "errors": report.errors,
+    })))
+}
+
+/// Remove a book from scribe's tracking: drop its `books` + `jobs` rows
+/// for every account the caller owns, and tombstone the asin so the boot
+/// reconcile pass won't resurrect it from the leftover sidecar. Files on
+/// disk (the encrypted source, the voucher sidecar, any m4b) are left
+/// untouched on purpose — removal is reversible by hand, and a future
+/// importer can re-adopt a decoded m4b when the voucher is gone for good.
+async fn remove_book(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Path(asin): Path<String>,
+) -> AppResult<Json<Value>> {
+    let pid = user.id();
+    let (books_deleted, jobs_deleted) = state
+        .db
+        .with(move |c| {
+            // Tombstone every (asin, account) the caller owns that has a
+            // book or job row, before deleting. Scope through accounts so
+            // one user can't remove another's books.
+            let now = chrono::Utc::now().timestamp();
+            c.execute(
+                "INSERT OR IGNORE INTO removed_books (asin, account_id, removed_at)
+                 SELECT DISTINCT ?1, account_id, ?2 FROM (
+                     SELECT account_id FROM books WHERE asin = ?1
+                     UNION SELECT account_id FROM jobs WHERE asin = ?1
+                 )
+                 WHERE account_id IN (SELECT id FROM accounts WHERE profile_id = ?3)",
+                rusqlite::params![asin, now, pid],
+            )?;
+            let jobs_deleted = c.execute(
+                "DELETE FROM jobs WHERE asin = ?1
+                 AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)",
+                rusqlite::params![asin, pid],
+            )?;
+            let books_deleted = c.execute(
+                "DELETE FROM books WHERE asin = ?1
+                 AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)",
+                rusqlite::params![asin, pid],
+            )?;
+            Ok((books_deleted, jobs_deleted))
+        })
+        .await?;
+    if books_deleted == 0 && jobs_deleted == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(json!({
+        "removed": true,
+        "books_deleted": books_deleted,
+        "jobs_deleted": jobs_deleted,
     })))
 }
 

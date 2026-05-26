@@ -156,6 +156,14 @@ async fn upsert(state: &AppState, account_id: &str, book: &LibraryBook) -> Resul
                     now,
                 ],
             )?;
+            // Audible listing the title is authoritative ownership — it
+            // supersedes any prior user removal. Clear the tombstone so a
+            // genuine re-purchase reappears (and reconcile stops skipping
+            // it). No-op for the common case where none exists.
+            c.execute(
+                "DELETE FROM removed_books WHERE asin = ?1 AND account_id = ?2",
+                rusqlite::params![asin, acct],
+            )?;
             let inserted = !exists;
             let updated = exists && prior.as_deref() != Some(status.as_str());
             Ok((inserted, updated))

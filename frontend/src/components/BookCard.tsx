@@ -7,6 +7,9 @@ type Props = {
   job: Job | null;
   onDownload: () => void;
   onReconvert: () => void;
+  /** Drop the book from scribe's tracking. Files on disk are kept; the
+   * caller confirms before this fires. */
+  onRemove: () => void;
   /** ASINs of other library rows sharing this title + primary author.
    * Surfaced as a small "dupe" badge so the user can decide whether to
    * download both editions or skip one. Empty when no overlap. */
@@ -22,6 +25,7 @@ export default function BookCard({
   job,
   onDownload,
   onReconvert,
+  onRemove,
   duplicateOf = [],
   region,
 }: Props) {
@@ -160,20 +164,29 @@ export default function BookCard({
               </span>
             )}
           </div>
-          {status.canEnqueue && (
-            <button onClick={onDownload} css={cardActionButton(theme)}>
-              download
-            </button>
-          )}
-          {status.canReconvert && (
+          <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
             <button
-              onClick={onReconvert}
-              css={cardActionButton(theme)}
-              title="rebuild m4b from the cached encrypted source"
+              onClick={onRemove}
+              css={removeButton(theme)}
+              title="remove from scribe — files on disk are kept"
             >
-              re-convert
+              remove
             </button>
-          )}
+            {status.canEnqueue && (
+              <button onClick={onDownload} css={cardActionButton(theme)}>
+                download
+              </button>
+            )}
+            {status.canReconvert && (
+              <button
+                onClick={onReconvert}
+                css={cardActionButton(theme)}
+                title="rebuild m4b from the cached encrypted source"
+              >
+                re-convert
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </article>
@@ -199,6 +212,23 @@ function cardActionButton(theme: ReturnType<typeof useTheme>) {
     "&:hover": {
       borderColor: theme.colors.activity.on,
       color: theme.colors.activity.on,
+    },
+  } as const;
+}
+
+function removeButton(theme: ReturnType<typeof useTheme>) {
+  return {
+    background: "transparent",
+    border: "none",
+    padding: "3px 4px",
+    fontFamily: theme.fonts.heading,
+    fontSize: 11,
+    color: theme.colors.text.muted,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    "&:hover": {
+      color: theme.colors.error,
     },
   } as const;
 }

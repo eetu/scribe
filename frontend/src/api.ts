@@ -157,6 +157,11 @@ export const api = {
     req<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   reconvertJob: (id: string) =>
     req<{ ok: boolean }>(`/api/jobs/${id}/reconvert`, { method: "POST" }),
+  removeBook: (asin: string) =>
+    req<{ removed: boolean; books_deleted: number; jobs_deleted: number }>(
+      `/api/books/${encodeURIComponent(asin)}`,
+      { method: "DELETE" },
+    ),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
   settings: () => req<Settings>("/api/settings"),
   patchSettings: (body: Record<string, string>) =>
