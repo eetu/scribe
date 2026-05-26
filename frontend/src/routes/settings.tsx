@@ -5,6 +5,7 @@ import { Fragment, useState } from "react";
 import useSWR, { mutate } from "swr";
 
 import { api, type Me, type SettingEntry } from "../api";
+import { mq } from "../mq";
 import { type ThemeOverride, useThemeOverride } from "../theme";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
@@ -249,7 +250,8 @@ function Field({
             padding: "6px 10px",
             borderRadius: 4,
             border: `1px solid ${theme.colors.border}`,
-            wordBreak: "break-all",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
           {display}
@@ -341,11 +343,25 @@ function KvCard({
           columnGap: 20,
           fontFamily: theme.fonts.body,
           fontSize: 13,
+          // Phones: stack key above value so long URLs / paths get the
+          // full row width and don't squeeze the key column into a
+          // single-character wrap.
+          [mq[0]]: {
+            gridTemplateColumns: "1fr",
+            rowGap: 4,
+          },
         }}
       >
         {rows.map(([k, v]) => (
           <Fragment key={String(k)}>
-            <span css={{ color: theme.colors.text.muted }}>{k}</span>
+            <span
+              css={{
+                color: theme.colors.text.muted,
+                [mq[0]]: { marginTop: 6 },
+              }}
+            >
+              {k}
+            </span>
             <span
               css={{
                 fontFamily: "monospace",
