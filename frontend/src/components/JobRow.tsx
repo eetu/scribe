@@ -86,29 +86,37 @@ export default function JobRow({ job, book, onCancel }: Props) {
         >
           {book?.title ?? job.asin}
         </span>
+        {/* Bar is only meaningful while a job is moving. Once it's
+            done/failed/cancelled, hide the fill but keep the 4px
+            slot reserved so completion doesn't reflow the row height
+            under the user. */}
         <div
           css={{
             position: "relative",
             height: 4,
-            background: theme.colors.activity.offBackground,
+            background: active
+              ? theme.colors.activity.offBackground
+              : "transparent",
             borderRadius: 2,
             overflow: "hidden",
           }}
         >
-          <div
-            css={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: `${progress}%`,
-              background:
-                status === "failed"
-                  ? theme.colors.error
-                  : theme.colors.activity.on,
-              transition: "width 0.4s ease",
-            }}
-          />
+          {active && (
+            <div
+              css={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${progress}%`,
+                background:
+                  status === "failed"
+                    ? theme.colors.error
+                    : theme.colors.activity.on,
+                transition: "width 0.4s ease",
+              }}
+            />
+          )}
         </div>
       </div>
       <span

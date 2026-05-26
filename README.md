@@ -31,11 +31,15 @@ visually.
 │   ├── SQLite (accounts, books, jobs)                 │
 │   ├── OIDC (kanidm) + DEV_AUTH fallback              │
 │   ├── Job orchestrator + polling loop                │
-│   └── NAS writer (two trees: library/ + original/)     │
+│   └── NAS writer (two trees: library/ + original/)   │
 │        │                                              │
 │        ▼ loopback HTTP                                │
 │  shim (Python, FastAPI, :3004)                       │
 │   └── wraps mkb79/audible — auth, library, voucher   │
+│                                                       │
+│  shelf (Rust, axum, :3006) — optional                │
+│   └── read-only ABS-compatible API over scribe.db    │
+│       for Listen This / other ABS clients            │
 │                                                       │
 └───────────────────────────────────────────────────────┘
                        │ HTTPS + bearer
@@ -99,6 +103,9 @@ cd shim && uv sync && uv run shim
 
 # Frontend
 cd frontend && yarn install && yarn dev
+
+# Shelf (optional — read-only ABS-compat sidecar for external clients)
+cd shelf && cargo run
 ```
 
 ## Deployment requirements (raspi)
@@ -164,6 +171,54 @@ page flips the chip to `missing` and surfaces a `re-convert` button:
 The flow has no extra press-side dependency — press treats the scribe URL as
 just another `content_url`. The only deployment-side requirements are the
 `SCRIBE_BIND`, `SCRIBE_INTERNAL_URL`, and UFW rule above.
+
+## Shelf — external ABS-compatible read API
+
+`scribe-shelf` is a separate, optional service that exposes a slice of the
+Audiobookshelf REST API over scribe's database. iOS / desktop clients that
+already speak ABS (Listen This, ABS web/iOS, etc.) can browse and stream
+scribe's library directly through shelf without needing to run the real
+Audiobookshelf alongside.
+
+It is built on the same principles as `press` and `shim`:
+
+- **Read-only by construction.** Opens `scribe.db` with
+  `SQLITE_OPEN_READ_ONLY`. No writes, no schema migrations, no listening-
+  progress state on the server side (CloudKit / clients own that).
+- **Static bearer key auth.** `SHELF_API_KEY` env value, compared in
+  constant time. Rotate by changing env + restart, no DB row to maintain.
+- **Optional.** Unset `SCRIBE_SHELF_URL` on the backend side = shelf
+  status is just not surfaced in the UI. The backend doesn't depend on
+  shelf for any of its own work.
+
+Endpoints implemented (the subset that Listen This consumes):
+
+| Path | Notes |
+|---|---|
+| `GET /ping` | unauthenticated liveness, what scribe pings for `shelf_healthy` |
+| `GET /api/me` | identity stub + library access permissions |
+| `GET /api/libraries` | single library entry derived from `SHELF_LIBRARY_NAME` |
+| `GET /api/libraries/{id}/items` | paginated, supports `?search=` |
+| `GET /api/items/{id}?expanded=1` | metadata + single synthesized track |
+| `GET /api/items/{id}/file/{ino}` | Range-aware m4b stream from `SHELF_LIBRARY_DIR` |
+| `GET /api/items/{id}/cover` | proxies the Audible CDN cover URL, 24h cache |
+
+`item_id` is `<account_id>:<asin>` so US + UK editions of the same book
+stay distinct. `ino` is a stable hash of the ASIN — opaque to clients.
+
+scribe's settings page surfaces the URL + API key as copy-able fields
+when both `SCRIBE_SHELF_URL` and `SCRIBE_SHELF_API_KEY` are set on the
+backend. A logged-in user can paste them into Listen This (or any
+ABS-compat client) directly.
+
+Local dev:
+
+```sh
+cd shelf && bacon       # listens on 127.0.0.1:3006 by default
+```
+
+then in Listen This: server URL `http://<host>:3006`, api key from
+`shelf/.env`.
 
 ## Status
 

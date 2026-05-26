@@ -11,6 +11,10 @@ type Props = {
    * Surfaced as a small "dupe" badge so the user can decide whether to
    * download both editions or skip one. Empty when no overlap. */
   duplicateOf?: string[];
+  /** Marketplace locale of the account this row belongs to ("us", "uk").
+   * Rendered as a small badge so users with multi-region accounts can
+   * tell editions apart at a glance. Undefined hides the badge. */
+  region?: string | null;
 };
 
 export default function BookCard({
@@ -19,6 +23,7 @@ export default function BookCard({
   onDownload,
   onReconvert,
   duplicateOf = [],
+  region,
 }: Props) {
   const theme = useTheme();
   const status = jobStatus(job);
@@ -37,6 +42,7 @@ export default function BookCard({
     >
       <div
         css={{
+          position: "relative",
           background: theme.colors.background.light,
           aspectRatio: "1 / 1",
           display: "flex",
@@ -54,6 +60,28 @@ export default function BookCard({
         ) : (
           <span css={{ color: theme.colors.text.muted, fontSize: 12 }}>
             no cover
+          </span>
+        )}
+        {region && (
+          <span
+            title={`account region: ${region.toUpperCase()}`}
+            css={{
+              position: "absolute",
+              top: 6,
+              left: 6,
+              fontFamily: theme.fonts.heading,
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "1px 6px",
+              borderRadius: 3,
+              letterSpacing: "0.04em",
+              background: "rgba(0, 0, 0, 0.55)",
+              color: "#fff",
+              textTransform: "uppercase",
+              pointerEvents: "none",
+            }}
+          >
+            {region}
           </span>
         )}
       </div>
