@@ -190,6 +190,12 @@ function cardActionButton(theme: ReturnType<typeof useTheme>) {
     padding: "3px 8px",
     color: theme.colors.text.main,
     cursor: "pointer",
+    // Keep the label on a single line even when the bottom row gets
+    // crowded (status chip + dupe badge + button). Without this the
+    // hyphen in "re-convert" lets the browser break the word and the
+    // button grows to two lines.
+    whiteSpace: "nowrap",
+    flexShrink: 0,
     "&:hover": {
       borderColor: theme.colors.activity.on,
       color: theme.colors.activity.on,
