@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useTheme } from "@emotion/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import useSWR, { mutate } from "swr";
 
 import { api, type Me, type SettingEntry } from "../api";
@@ -34,6 +34,8 @@ function SettingsPage() {
     ["shim healthy", status.shim_healthy ? "yes" : "no"],
     ["press", status.press_url ?? "(not configured)"],
     ["press healthy", status.press_healthy ? "yes" : "no"],
+    ["shelf", status.shelf_url ?? "(not configured)"],
+    ["shelf healthy", status.shelf_healthy ? "yes" : "no"],
     ["dev_auth", status.dev_auth ? "on" : "off"],
     ["library dir", status.library_dir],
     ["original dir", status.original_dir],
@@ -63,6 +65,19 @@ function SettingsPage() {
           entry={settings.poll_interval_min}
         />
       </Card>
+
+      {me.shelf_url && me.shelf_api_key && (
+        <>
+          <SectionTitle theme={theme}>shelf access</SectionTitle>
+          <Card theme={theme}>
+            <ShelfAccess
+              theme={theme}
+              url={me.shelf_url}
+              apiKey={me.shelf_api_key}
+            />
+          </Card>
+        </>
+      )}
 
       <SectionTitle theme={theme}>environment</SectionTitle>
       <KvCard theme={theme} rows={envRows} />
@@ -161,6 +176,111 @@ function SectionTitle({
       {children}
     </h3>
   );
+}
+
+function ShelfAccess({
+  theme,
+  url,
+  apiKey,
+}: {
+  theme: ReturnType<typeof useTheme>;
+  url: string;
+  apiKey: string;
+}) {
+  return (
+    <div css={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div
+        css={{
+          fontSize: 12,
+          color: theme.colors.text.muted,
+          lineHeight: 1.5,
+        }}
+      >
+        scribe-shelf exposes the library to audiobookshelf-compatible clients
+        like listen-this. paste the URL + api key into the client's settings.
+      </div>
+      <Field theme={theme} label="server URL" value={url} />
+      <Field theme={theme} label="api key" value={apiKey} secret />
+    </div>
+  );
+}
+
+function Field({
+  theme,
+  label,
+  value,
+  secret,
+}: {
+  theme: ReturnType<typeof useTheme>;
+  label: string;
+  value: string;
+  secret?: boolean;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const display = secret && !revealed ? value.replace(/./g, "•") : value;
+  return (
+    <div css={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span
+        css={{
+          fontFamily: theme.fonts.heading,
+          fontSize: 11,
+          color: theme.colors.text.muted,
+        }}
+      >
+        {label}
+      </span>
+      <div css={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <code
+          css={{
+            flex: 1,
+            fontFamily: "monospace",
+            fontSize: 12,
+            color: theme.colors.text.main,
+            background: theme.colors.background.light,
+            padding: "6px 10px",
+            borderRadius: 4,
+            border: `1px solid ${theme.colors.border}`,
+            wordBreak: "break-all",
+          }}
+        >
+          {display}
+        </code>
+        {secret && (
+          <button onClick={() => setRevealed((v) => !v)} css={fieldBtn(theme)}>
+            {revealed ? "hide" : "show"}
+          </button>
+        )}
+        <button
+          onClick={async () => {
+            await navigator.clipboard.writeText(value);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          css={fieldBtn(theme)}
+        >
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function fieldBtn(theme: ReturnType<typeof useTheme>) {
+  return {
+    background: "transparent",
+    border: `1px solid ${theme.colors.border}`,
+    borderRadius: 4,
+    fontFamily: theme.fonts.heading,
+    fontSize: 11,
+    padding: "4px 10px",
+    color: theme.colors.text.muted,
+    cursor: "pointer",
+    "&:hover": {
+      color: theme.colors.activity.on,
+      borderColor: theme.colors.activity.on,
+    },
+  } as const;
 }
 
 function Card({

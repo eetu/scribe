@@ -10,6 +10,12 @@ pub struct Config {
     pub shim_url: String,
     pub press_url: Option<String>,
     pub press_token: Option<String>,
+    /// Optional shelf (read-only ABS-compat sidecar) base URL. Used
+    /// only to surface health + the matching API key in the UI so a
+    /// logged-in user can copy it into Listen This or another ABS
+    /// client. Scribe never talks to shelf for any other purpose.
+    pub shelf_url: Option<String>,
+    pub shelf_api_key: Option<String>,
     pub library_dir: PathBuf,
     pub original_dir: PathBuf,
     /// LAN URL of this scribe instance, as seen from the press worker.
@@ -65,6 +71,10 @@ impl Config {
                 .unwrap_or_else(|_| "http://127.0.0.1:3004".into()),
             press_url: env::var("SCRIBE_PRESS_URL").ok(),
             press_token: env::var("SCRIBE_PRESS_TOKEN").ok(),
+            shelf_url: env::var("SCRIBE_SHELF_URL").ok().filter(|s| !s.is_empty()),
+            shelf_api_key: env::var("SCRIBE_SHELF_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty()),
             library_dir: env::var("SCRIBE_LIBRARY_DIR")
                 .unwrap_or_else(|_| "/mnt/audiobooks/library".into())
                 .into(),

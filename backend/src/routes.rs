@@ -61,9 +61,11 @@ pub fn router(state: AppState) -> Router {
 async fn status(State(state): State<AppState>) -> Json<Value> {
     let shim = ShimClient::new(&state);
     let press = PressClient::new(&state);
-    let (shim_healthy, press_health) = tokio::join!(shim.health(), async {
-        press.health().await.unwrap_or(false)
-    });
+    let (shim_healthy, press_health, shelf_healthy) = tokio::join!(
+        shim.health(),
+        async { press.health().await.unwrap_or(false) },
+        async { shelf_health(&state).await },
+    );
     Json(json!({
         "service": "scribe",
         "version": env!("CARGO_PKG_VERSION"),
@@ -71,6 +73,8 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
         "shim_healthy": shim_healthy,
         "press_url": state.cfg.press_url,
         "press_healthy": press_health,
+        "shelf_url": state.cfg.shelf_url,
+        "shelf_healthy": shelf_healthy,
         "dev_auth": state.cfg.dev_auth,
         "auto_enqueue_default": state.cfg.auto_enqueue_new,
         "library_dir": state.cfg.library_dir,
@@ -79,13 +83,39 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+/// Best-effort health ping for the optional shelf sidecar. Returns
+/// `false` for any non-success — unconfigured, unreachable, timeout,
+/// or auth glitch — so the UI can render a single "shelf is live"
+/// indicator without branching on the failure mode.
+async fn shelf_health(state: &AppState) -> bool {
+    let Some(url) = state.cfg.shelf_url.as_deref() else {
+        return false;
+    };
+    let probe = format!("{}/ping", url.trim_end_matches('/'));
+    let req = state
+        .http
+        .get(probe)
+        .timeout(std::time::Duration::from_secs(2));
+    match req.send().await {
+        Ok(r) => r.status().is_success(),
+        Err(_) => false,
+    }
+}
+
 // ---------- session probe ----------
 
-async fn me(user: AuthProfile) -> Json<Value> {
+async fn me(user: AuthProfile, State(state): State<AppState>) -> Json<Value> {
+    // Shelf API key is shown to logged-in users only. The /api/me route
+    // already requires AuthProfile, so any kanidm-authenticated client
+    // can read this and configure their Listen This (or any ABS-compat
+    // client) without a separate secret-distribution channel. Stays
+    // null when shelf isn't deployed.
     Json(json!({
         "sub": user.sub(),
         "profile_id": user.id(),
         "email": user.profile.email,
+        "shelf_url": state.cfg.shelf_url,
+        "shelf_api_key": state.cfg.shelf_api_key,
     }))
 }
 

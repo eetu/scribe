@@ -27,14 +27,17 @@ COPY Cargo.toml Cargo.lock ./
 COPY backend/Cargo.toml backend/Cargo.toml
 COPY press/Cargo.toml press/Cargo.toml
 COPY shared/Cargo.toml shared/Cargo.toml
+COPY shelf/Cargo.toml shelf/Cargo.toml
 # Stub sources for every workspace member. Press isn't shipped in the
 # backend image (it runs native on the mini), but cargo still demands
 # every declared member's manifest target exists on disk for workspace
 # discovery to succeed.
-RUN mkdir -p backend/src press/src shared/src \
+RUN mkdir -p backend/src press/src shared/src shelf/src \
     && printf 'fn main() {}\n' > backend/src/main.rs \
     && : > backend/src/lib.rs \
     && printf 'fn main() {}\n' > press/src/main.rs \
+    && printf 'fn main() {}\n' > shelf/src/main.rs \
+    && : > shelf/src/lib.rs \
     && : > shared/src/lib.rs \
     && xx-cargo build --release --workspace
 
@@ -61,6 +64,17 @@ COPY shared/src ./shared/src
 COPY press/src ./press/src
 RUN touch shared/src/lib.rs press/src/main.rs \
     && xx-cargo build --release -p scribe-press
+
+# --- Stage 3c: Build scribe-shelf ---
+#
+# Optional read-only ABS-compat sidecar — share scribe's SQLite for
+# external clients (Listen This, etc) without exposing scribe's UI.
+FROM workspace-deps AS shelf-build
+ARG TARGETPLATFORM
+COPY shared/src ./shared/src
+COPY shelf/src ./shelf/src
+RUN touch shared/src/lib.rs shelf/src/main.rs shelf/src/lib.rs \
+    && xx-cargo build --release -p scribe-shelf
 
 # --- Stage 4: Backend runtime ---
 FROM scratch AS runner
@@ -107,7 +121,29 @@ EXPOSE 3005
 
 CMD ["./scribe-press"]
 
-# --- Stage 6: shim runtime (Python) ---
+# --- Stage 6: shelf runtime (Rust, scratch) ---
+#
+# Read-only ABS-compatible sidecar. Mounts scribe.db read-only and the
+# library tree read-only — no writable surface inside the container.
+FROM scratch AS shelf-runner
+WORKDIR /app
+LABEL org.opencontainers.image.description="scribe-shelf — read-only ABS-compatible view of scribe's library"
+LABEL org.opencontainers.image.source="https://github.com/eetu/scribe"
+
+COPY --from=shelf-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=shelf-build /app/target/*/release/scribe-shelf ./scribe-shelf
+
+ENV SHELF_BIND=0.0.0.0:3006
+ENV SHELF_DB_PATH=/data/scribe.db
+ENV SHELF_LIBRARY_DIR=/library
+
+USER 1000
+
+EXPOSE 3006
+
+CMD ["./scribe-shelf"]
+
+# --- Stage 7: shim runtime (Python) ---
 #
 # Shim is Pi-side too. Keeps mkb79/audible's Python deps isolated from the
 # Rust backend so a rotting Audible auth flow swap doesn't force the Rust

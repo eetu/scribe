@@ -1906,6 +1906,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "scribe-shelf"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "dotenvy",
+ "futures-util",
+ "reqwest",
+ "rusqlite",
+ "scribe-shared",
+ "serde",
+ "serde_json",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sec1"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

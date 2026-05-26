@@ -5,6 +5,8 @@ export type Status = {
   shim_healthy: boolean;
   press_url: string | null;
   press_healthy: boolean;
+  shelf_url: string | null;
+  shelf_healthy: boolean;
   dev_auth: boolean;
   auto_enqueue_default: boolean;
   library_dir: string;
@@ -16,6 +18,8 @@ export type Me = {
   sub: string;
   profile_id: number;
   email: string;
+  shelf_url: string | null;
+  shelf_api_key: string | null;
 };
 
 export type SettingEntry = {
