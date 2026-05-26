@@ -230,10 +230,20 @@ function Field({
       >
         {label}
       </span>
-      <div css={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div
+        css={{
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          // Narrow viewports (mobile) can't fit the value + both
+          // buttons on one row — wrap rather than overflow off-screen.
+          flexWrap: "wrap",
+        }}
+      >
         <code
           css={{
-            flex: 1,
+            flex: "1 1 200px",
+            minWidth: 0,
             fontFamily: "monospace",
             fontSize: 12,
             color: theme.colors.text.main,
