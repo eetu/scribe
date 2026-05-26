@@ -165,28 +165,25 @@ async fn run_ffmpeg(
     // doesn't trip the same bug, so keep faststart there for HTTP
     // streaming friendliness.
     // Per-DRM muxer + codec strategy:
-    // - AAXC keeps `-c copy` (lossless remux). AAXC frames are clean,
-    //   stts comes out correct, +faststart helps HTTP streaming.
-    // - AAX re-encodes audio via `-c:a aac`. ffmpeg's `-c copy` path
-    //   on AAX-decoded input bakes a broken stts (single entry asserts
-    //   every AAC frame is 1024 samples, but AAX's trailing frame is
-    //   shorter — AVFoundation rejects at playback). Re-encoding makes
-    //   the muxer compute correct sample timings. Bitrate matched at
-    //   64k which is at or above typical AAX source (22050 Hz stereo).
-    //   Text + video (chapter + cover) tracks stay copied to preserve
-    //   atoms scribe writes.
+    // - AAXC: -c copy + +faststart. Audible's modern AAXC frames are
+    //   clean, stts comes out correct, +faststart helps HTTP streaming.
+    // - AAX: -c copy via -f ipod muxer. Re-encoding is blocked because
+    //   stock ffmpeg's AAC decoder rejects Audible's older AAC with
+    //   "Reserved bit set" / "ms_present = 3 is reserved" / scalable
+    //   AOT extension bits in every frame, so the whole pipeline
+    //   collapses. -c copy preserves audio bytes but ffmpeg's mp4
+    //   muxer writes a single-entry stts (asserts every frame is 1024
+    //   samples — incorrect for the trailing partial frame). The
+    //   resulting m4b parses but AVFoundation rejects on play. The
+    //   stts gets patched post-hoc by the scribe-press job runner
+    //   reading mdat sample sizes and computing the actual last
+    //   sample_duration; that step is non-destructive and only touches
+    //   one atom.
+    cmd.args(["-c", "copy"]);
     let mp4_format = match &req.drm {
-        Drm::Aax { .. } => {
-            cmd.args([
-                "-map", "0",
-                "-c", "copy",
-                "-c:a", "aac",
-                "-b:a", "64k",
-            ]);
-            "ipod"
-        }
+        Drm::Aax { .. } => "ipod",
         Drm::Aaxc { .. } => {
-            cmd.args(["-c", "copy", "-movflags", "+faststart"]);
+            cmd.args(["-movflags", "+faststart"]);
             "mp4"
         }
     };
