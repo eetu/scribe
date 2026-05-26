@@ -167,9 +167,16 @@ async fn run_ffmpeg(
     cmd.args(["-c", "copy"]);
     let mp4_format = match &req.drm {
         Drm::Aax { .. } => {
-            // Leave moov at the end. No faststart rewrite, no extra
-            // muxer surgery. Matches the working OA output shape.
-            "mp4"
+            // ffmpeg's mp4 muxer writes a single stts entry assuming
+            // every AAC frame is exactly 1024 samples — incorrect for
+            // the final partial frame typical in AAX content. The
+            // ipod muxer is designed for audiobook output and writes
+            // a two-entry stts that records the trailing partial
+            // sample correctly, matching what OpenAudible / iTunes
+            // produce. AVFoundation rejects the mp4-muxer variant at
+            // play time (asset parses, AVPlayer pauses immediately).
+            // No +faststart with ipod — moov lives at the end.
+            "ipod"
         }
         Drm::Aaxc { .. } => {
             cmd.args(["-movflags", "+faststart"]);
