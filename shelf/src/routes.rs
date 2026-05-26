@@ -32,6 +32,7 @@ async fn ping() -> Json<serde_json::Value> {
 }
 
 async fn me(State(state): State<ShelfState>) -> Json<abs::MeResponse> {
+    let now = chrono::Utc::now().timestamp_millis();
     Json(abs::MeResponse {
         id: "shelf-user".into(),
         username: "scribe".into(),
@@ -39,26 +40,38 @@ async fn me(State(state): State<ShelfState>) -> Json<abs::MeResponse> {
         permissions: abs::MePermissions {
             access_all_libraries: 1,
             access_all_tags: 1,
+            access_explicit_content: 1,
             download: true,
             update: false,
             delete: false,
             upload: false,
         },
         libraries_accessible: vec![library_id(&state.cfg.library_name)],
+        item_tags_accessible: Vec::new(),
+        is_active: true,
+        is_locked: false,
+        last_seen: now,
+        created_at: now,
     })
 }
 
 async fn libraries(State(state): State<ShelfState>) -> Json<abs::LibrariesResponse> {
     let lib_id = library_id(&state.cfg.library_name);
+    let folder_id = format!("{lib_id}-root");
     Json(abs::LibrariesResponse {
         libraries: vec![abs::Library {
             id: lib_id.clone(),
             name: state.cfg.library_name.clone(),
             folders: vec![abs::LibraryFolder {
-                id: format!("{lib_id}-root"),
+                id: folder_id,
                 full_path: state.cfg.library_dir.display().to_string(),
+                library_id: lib_id,
+                added_at: 0,
             }],
+            display_order: 1,
+            icon: "audiobookshelf".into(),
             media_type: "book".into(),
+            provider: "audible".into(),
         }],
     })
 }
@@ -177,6 +190,13 @@ async fn library_items(
         total,
         limit: q.limit,
         page: q.page,
+        sort_by: "media.metadata.title".into(),
+        sort_desc: false,
+        filter_by: q.search.unwrap_or_default(),
+        media_type: "book".into(),
+        minified: true,
+        collapseseries: false,
+        include: String::new(),
     }))
 }
 
@@ -396,7 +416,7 @@ fn parse_item_id(s: &str) -> ShelfResult<(String, String)> {
 fn build_item(
     library_id: &str,
     b: &BookRow,
-    _library_dir: &std::path::Path,
+    library_dir: &std::path::Path,
     include_tracks: bool,
 ) -> abs::LibraryItem {
     let id = item_id(b);
@@ -408,105 +428,208 @@ fn build_item(
         .as_deref()
         .map(|p| std::path::Path::new(p).is_file())
         .unwrap_or(false);
-    // aaxc presence isn't exposed in the ABS schema — Listen This
-    // doesn't ask for the encrypted source. Drop the variable rather
-    // than fabricate a field.
-    let _ = b.aaxc_path.as_deref();
-    // Cover path is served on demand via /api/items/{id}/cover (proxy
-    // to the Audible CDN). The metadata field is informational only;
-    // leave it absent rather than point at the m4b which has no
-    // standalone cover bytes the client can use directly.
-    // Non-null when we know there's a cover available on the Audible
-    // CDN. Some clients gate the cover fetch on this field being
-    // truthy before they hit /api/items/{id}/cover. Value is a stable
-    // sentinel — the real bytes come from the /cover endpoint.
+    // coverPath is a presence sentinel — clients gate the /cover fetch
+    // on this being non-null. Actual bytes come from the proxy
+    // endpoint, not from disk.
     let cover_path: Option<String> = b
         .cover_url
         .as_deref()
-        .map(|_| format!("/api/items/{}/cover", item_id(b)));
+        .map(|_| format!("/api/items/{}/cover", id));
     let size = b
         .m4b_path
         .as_deref()
         .and_then(|p| std::fs::metadata(p).ok())
         .map(|m| m.len())
         .unwrap_or(0);
+
+    let added_ms = b.first_seen_at.saturating_mul(1000);
+    let ino = item_ino(&b.account_id, &b.asin);
+    let folder_id = format!("{library_id}-root");
+
+    // Synthesise filesystem-style paths for the LibraryItem fields ABS
+    // expects. relPath is `<Author>/<Title>`, path is library_dir +
+    // relPath. Both are informational — clients can't read them
+    // directly anyway since they live on the server.
+    let rel_path = match (authors.first(), b.series_title.as_deref()) {
+        (Some(author), Some(series)) => format!("{}/{}/{}", author, series, b.title),
+        (Some(author), None) => format!("{}/{}", author, b.title),
+        (None, _) => b.title.clone(),
+    };
+    let path = library_dir.join(&rel_path).display().to_string();
+
+    let m4b_filename = b
+        .m4b_path
+        .as_deref()
+        .and_then(|p| std::path::Path::new(p).file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("audiobook.m4b")
+        .to_string();
+    let m4b_rel = format!("{}/{}", rel_path, m4b_filename);
+
+    let track_ino_s = track_ino(&b.asin);
+    let audio_meta = abs::AudioFileMetadata {
+        filename: m4b_filename.clone(),
+        ext: ".m4b".into(),
+        path: b.m4b_path.clone().unwrap_or_default(),
+        rel_path: m4b_rel.clone(),
+        size,
+        mtime_ms: added_ms,
+        ctime_ms: added_ms,
+        birthtime_ms: added_ms,
+    };
+
     let tracks = if include_tracks && m4b_present {
         vec![abs::Track {
             index: 1,
-            ino: track_ino(&b.asin),
+            ino: track_ino_s.clone(),
             title: b.title.clone(),
-            content_url: format!("/api/items/{}/file/{}", id, track_ino(&b.asin)),
+            content_url: format!("/api/items/{}/file/{}", id, track_ino_s),
             duration: duration_sec,
             start_offset: 0.0,
             mime_type: "audio/mp4".into(),
+            metadata: audio_meta.clone(),
         }]
     } else {
         Vec::new()
     };
-    abs::LibraryItem {
-        id,
-        library_id: library_id.to_string(),
-        media: abs::Media {
-            metadata: abs::Metadata {
-                title: b.title.clone(),
-                title_ignore_prefix: title_ignore_prefix(&b.title),
-                subtitle: b.subtitle.clone(),
-                authors: authors
-                    .iter()
-                    .map(|a| abs::NamedRef {
-                        id: format!("author-{}", slugify(a)),
-                        name: a.clone(),
-                    })
-                    .collect(),
-                author_name: if authors.is_empty() {
-                    None
-                } else {
-                    Some(authors.join(", "))
-                },
-                narrators: narrators.clone(),
-                narrator_name: if narrators.is_empty() {
-                    None
-                } else {
-                    Some(narrators.join(", "))
-                },
-                series: b
-                    .series_title
-                    .as_ref()
-                    .map(|s| {
-                        vec![abs::SeriesRef {
-                            id: format!("series-{}", slugify(s)),
-                            name: s.clone(),
-                            sequence: b.series_sequence.clone(),
-                        }]
-                    })
-                    .unwrap_or_default(),
-                series_name: b.series_title.clone(),
-                genres: Vec::new(),
-                published_year: b
-                    .purchase_date
-                    .as_ref()
-                    .and_then(|d| d.split('-').next().map(|s| s.to_string())),
-                description: None,
-                asin: Some(b.asin.clone()),
-                language: b.language.clone(),
-            },
-            cover_path,
-            tracks,
-            chapters: Vec::new(),
+    let audio_files = if include_tracks && m4b_present {
+        vec![abs::AudioFile {
+            index: 1,
+            ino: track_ino_s.clone(),
+            metadata: audio_meta,
+            added_at: added_ms,
+            updated_at: added_ms,
             duration: duration_sec,
-            size,
+            mime_type: "audio/mp4".into(),
+            codec: Some("aac".into()),
+            format: Some("MPEG-4".into()),
+            bit_rate: None,
+            channels: Some(2),
+            error: None,
+            exclude: false,
+            embedded_cover_art: None,
+            chapters: Vec::new(),
+        }]
+    } else {
+        Vec::new()
+    };
+
+    let metadata = abs::Metadata {
+        title: b.title.clone(),
+        title_ignore_prefix: title_ignore_prefix(&b.title),
+        subtitle: b.subtitle.clone(),
+        authors: authors
+            .iter()
+            .map(|a| abs::NamedRef {
+                id: format!("author-{}", slugify(a)),
+                name: a.clone(),
+            })
+            .collect(),
+        author_name: if authors.is_empty() {
+            None
+        } else {
+            Some(authors.join(", "))
         },
+        author_name_lf: if authors.is_empty() {
+            None
+        } else {
+            Some(
+                authors
+                    .iter()
+                    .map(|a| last_first(a))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )
+        },
+        narrators: narrators.clone(),
+        narrator_name: if narrators.is_empty() {
+            None
+        } else {
+            Some(narrators.join(", "))
+        },
+        series: b
+            .series_title
+            .as_ref()
+            .map(|s| {
+                vec![abs::SeriesRef {
+                    id: format!("series-{}", slugify(s)),
+                    name: s.clone(),
+                    sequence: b.series_sequence.clone(),
+                }]
+            })
+            .unwrap_or_default(),
+        series_name: b.series_title.clone(),
+        genres: Vec::new(),
+        published_year: b
+            .purchase_date
+            .as_ref()
+            .and_then(|d| d.split('-').next().map(|s| s.to_string())),
+        published_date: b.purchase_date.clone(),
+        publisher: None,
+        description: None,
+        isbn: None,
+        asin: Some(b.asin.clone()),
+        language: b.language.clone(),
+        explicit: false,
+    };
+
+    abs::LibraryItem {
+        id: id.clone(),
+        ino: ino.clone(),
+        library_id: library_id.to_string(),
+        folder_id,
+        path,
+        rel_path,
+        is_file: false,
+        mtime_ms: added_ms,
+        ctime_ms: added_ms,
+        birthtime_ms: added_ms,
+        added_at: added_ms,
+        updated_at: added_ms,
         is_missing: !m4b_present,
         is_invalid: false,
         media_type: "book".into(),
-        // Even though the m4b is the only file, we report `isFile=false`
-        // because each book lives in its own folder under library_dir.
-        // Listen This branches on this for some metadata UI but doesn't
-        // depend on it for streaming once it uses /file/{ino}.
-        is_file: false,
-        added_at: b.first_seen_at.saturating_mul(1000),
-        updated_at: b.first_seen_at.saturating_mul(1000),
+        size,
+        num_files: if m4b_present { 1 } else { 0 },
+        media: abs::Media {
+            library_item_id: id,
+            metadata,
+            cover_path,
+            tags: Vec::new(),
+            audio_files,
+            chapters: Vec::new(),
+            tracks,
+            duration: duration_sec,
+            size,
+            num_tracks: if m4b_present { 1 } else { 0 },
+            num_audio_files: if m4b_present { 1 } else { 0 },
+            num_chapters: 0,
+            ebook_format: None,
+            ebook_file: None,
+        },
     }
+}
+
+fn item_ino(account_id: &str, asin: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    account_id.hash(&mut h);
+    ":".hash(&mut h);
+    asin.hash(&mut h);
+    format!("item-{:016x}", h.finish())
+}
+
+/// Best-effort "Last, First" rendering from a "First Middle Last"
+/// name. ABS uses this for surname sort indexes. Single-token names
+/// (mononyms) are returned as-is.
+fn last_first(name: &str) -> String {
+    let trimmed = name.trim();
+    let Some(last_space) = trimmed.rfind(' ') else {
+        return trimmed.to_string();
+    };
+    let last = &trimmed[last_space + 1..];
+    let rest = &trimmed[..last_space];
+    format!("{last}, {rest}")
 }
 
 fn track_ino(asin: &str) -> String {
