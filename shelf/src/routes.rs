@@ -15,16 +15,28 @@ use crate::error::{ShelfError, ShelfResult};
 use crate::state::ShelfState;
 
 pub fn router(state: ShelfState) -> Router {
+    // Cover bytes get their own unauthenticated route. Listen This (and
+    // typical ABS web clients) render the thumbnail through a plain
+    // <img>/AsyncImage which doesn't carry the bearer header; serving
+    // covers behind auth made every thumbnail 401. The bytes themselves
+    // are not sensitive — they're already publicly fetchable from
+    // Audible's CDN, shelf just proxies + caches them. Library content
+    // (m4b streams) stays bearer-gated.
+    let unauth = Router::new()
+        .route("/api/items/{id}/cover", get(item_cover))
+        .with_state(state.clone());
     let protected = Router::new()
         .route("/api/me", get(me))
         .route("/api/libraries", get(libraries))
         .route("/api/libraries/{id}/items", get(library_items))
         .route("/api/items/{id}", get(item_detail))
         .route("/api/items/{id}/file/{ino}", get(item_file))
-        .route("/api/items/{id}/cover", get(item_cover))
         .route_layer(middleware::from_fn_with_state(state.clone(), bearer_guard))
         .with_state(state.clone());
-    Router::new().route("/ping", get(ping)).merge(protected)
+    Router::new()
+        .route("/ping", get(ping))
+        .merge(unauth)
+        .merge(protected)
 }
 
 async fn ping() -> Json<serde_json::Value> {
