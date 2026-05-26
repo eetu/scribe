@@ -104,7 +104,19 @@ pub struct Metadata {
     /// Author list. Each entry has an opaque `id` and a `name`.
     pub authors: Vec<NamedRef>,
     pub narrators: Vec<String>,
+    /// Comma-joined author names. ABS's older API surfaced this as a
+    /// single string and Listen This still decodes it that way; some
+    /// clients ignore the structured `authors` array entirely. Cheap to
+    /// emit both.
+    #[serde(rename = "authorName")]
+    pub author_name: Option<String>,
+    #[serde(rename = "narratorName")]
+    pub narrator_name: Option<String>,
     pub series: Vec<SeriesRef>,
+    /// Comma-joined series name(s). Same compatibility rationale as
+    /// `authorName` — older ABS clients read this single-string form.
+    #[serde(rename = "seriesName")]
+    pub series_name: Option<String>,
     pub genres: Vec<String>,
     #[serde(rename = "publishedYear")]
     pub published_year: Option<String>,

@@ -416,7 +416,14 @@ fn build_item(
     // to the Audible CDN). The metadata field is informational only;
     // leave it absent rather than point at the m4b which has no
     // standalone cover bytes the client can use directly.
-    let cover_path: Option<String> = None;
+    // Non-null when we know there's a cover available on the Audible
+    // CDN. Some clients gate the cover fetch on this field being
+    // truthy before they hit /api/items/{id}/cover. Value is a stable
+    // sentinel — the real bytes come from the /cover endpoint.
+    let cover_path: Option<String> = b
+        .cover_url
+        .as_deref()
+        .map(|_| format!("/api/items/{}/cover", item_id(b)));
     let size = b
         .m4b_path
         .as_deref()
@@ -451,7 +458,17 @@ fn build_item(
                         name: a.clone(),
                     })
                     .collect(),
-                narrators,
+                author_name: if authors.is_empty() {
+                    None
+                } else {
+                    Some(authors.join(", "))
+                },
+                narrators: narrators.clone(),
+                narrator_name: if narrators.is_empty() {
+                    None
+                } else {
+                    Some(narrators.join(", "))
+                },
                 series: b
                     .series_title
                     .as_ref()
@@ -463,6 +480,7 @@ fn build_item(
                         }]
                     })
                     .unwrap_or_default(),
+                series_name: b.series_title.clone(),
                 genres: Vec::new(),
                 published_year: b
                     .purchase_date
