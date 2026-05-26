@@ -246,6 +246,7 @@ async fn item_detail(
                 "SELECT b.asin, b.account_id, b.title, b.subtitle, b.authors_json,
                         b.narrators_json, b.series_title, b.series_sequence,
                         b.runtime_length_ms, b.cover_url, b.purchase_date,
+                        b.first_seen_at,
                         j.m4b_path, j.aaxc_path, j.status
                  FROM books b
                  LEFT JOIN (
