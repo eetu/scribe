@@ -164,22 +164,29 @@ async fn run_ffmpeg(
     // the end and plays cleanly on iOS / macOS QuickTime. AAXC output
     // doesn't trip the same bug, so keep faststart there for HTTP
     // streaming friendliness.
-    cmd.args(["-c", "copy"]);
+    // Per-DRM muxer + codec strategy:
+    // - AAXC keeps `-c copy` (lossless remux). AAXC frames are clean,
+    //   stts comes out correct, +faststart helps HTTP streaming.
+    // - AAX re-encodes audio via `-c:a aac`. ffmpeg's `-c copy` path
+    //   on AAX-decoded input bakes a broken stts (single entry asserts
+    //   every AAC frame is 1024 samples, but AAX's trailing frame is
+    //   shorter — AVFoundation rejects at playback). Re-encoding makes
+    //   the muxer compute correct sample timings. Bitrate matched at
+    //   64k which is at or above typical AAX source (22050 Hz stereo).
+    //   Text + video (chapter + cover) tracks stay copied to preserve
+    //   atoms scribe writes.
     let mp4_format = match &req.drm {
         Drm::Aax { .. } => {
-            // ffmpeg's mp4 muxer writes a single stts entry assuming
-            // every AAC frame is exactly 1024 samples — incorrect for
-            // the final partial frame typical in AAX content. The
-            // ipod muxer is designed for audiobook output and writes
-            // a two-entry stts that records the trailing partial
-            // sample correctly, matching what OpenAudible / iTunes
-            // produce. AVFoundation rejects the mp4-muxer variant at
-            // play time (asset parses, AVPlayer pauses immediately).
-            // No +faststart with ipod — moov lives at the end.
+            cmd.args([
+                "-map", "0",
+                "-c", "copy",
+                "-c:a", "aac",
+                "-b:a", "64k",
+            ]);
             "ipod"
         }
         Drm::Aaxc { .. } => {
-            cmd.args(["-movflags", "+faststart"]);
+            cmd.args(["-c", "copy", "-movflags", "+faststart"]);
             "mp4"
         }
     };
