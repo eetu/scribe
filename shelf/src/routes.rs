@@ -99,7 +99,11 @@ struct ItemsQuery {
 }
 
 fn default_limit() -> u64 {
-    50
+    // ABS semantics: a missing (or 0) limit means "return everything",
+    // not a page of 50. Clients like Listen This fetch the whole library
+    // in one call and page client-side; capping here silently truncated
+    // the shelf to the first 50 done books.
+    0
 }
 
 async fn library_items(
@@ -114,7 +118,9 @@ async fn library_items(
     let library_dir = state.cfg.library_dir.clone();
     let library_id_owned = id.clone();
     let search = q.search.clone();
-    let limit = q.limit;
+    // limit==0 → unbounded. SQLite reads `LIMIT -1` as no cap (OFFSET
+    // still honoured), so we keep one parameterised query for both cases.
+    let sql_limit: i64 = if q.limit == 0 { -1 } else { q.limit as i64 };
     let books: Vec<BookRow> = state
         .db
         .with(move |c| {
@@ -180,10 +186,10 @@ async fn library_items(
                 })
             };
             let rows: Vec<BookRow> = if let Some(w) = where_param {
-                stmt.query_map(rusqlite::params![w, limit as i64, offset as i64], map)?
+                stmt.query_map(rusqlite::params![w, sql_limit, offset as i64], map)?
                     .collect::<rusqlite::Result<Vec<_>>>()?
             } else {
-                stmt.query_map(rusqlite::params![limit as i64, offset as i64], map)?
+                stmt.query_map(rusqlite::params![sql_limit, offset as i64], map)?
                     .collect::<rusqlite::Result<Vec<_>>>()?
             };
             Ok(rows)
