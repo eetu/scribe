@@ -75,6 +75,13 @@ pub struct LibraryItem {
     /// m4b — matches ABS's behavior for folder-based libraries.
     #[serde(rename = "isFile")]
     pub is_file: bool,
+    /// Unix milliseconds. ABS clients (including Listen This) decode
+    /// these as non-optional Int64 and fail the entire response when
+    /// either is missing. Sourced from books.first_seen_at × 1000.
+    #[serde(rename = "addedAt")]
+    pub added_at: i64,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Serialize)]

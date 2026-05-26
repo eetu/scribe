@@ -98,6 +98,7 @@ async fn library_items(
                     "SELECT b.asin, b.account_id, b.title, b.subtitle, b.authors_json,
                             b.narrators_json, b.series_title, b.series_sequence,
                             b.runtime_length_ms, b.cover_url, b.purchase_date,
+                            b.first_seen_at,
                             j.m4b_path, j.aaxc_path, j.status
                      FROM books b
                      LEFT JOIN (
@@ -115,6 +116,7 @@ async fn library_items(
                     "SELECT b.asin, b.account_id, b.title, b.subtitle, b.authors_json,
                             b.narrators_json, b.series_title, b.series_sequence,
                             b.runtime_length_ms, b.cover_url, b.purchase_date,
+                            b.first_seen_at,
                             j.m4b_path, j.aaxc_path, j.status
                      FROM books b
                      LEFT JOIN (
@@ -141,10 +143,11 @@ async fn library_items(
                     runtime_length_ms: r.get::<_, Option<i64>>(8)?,
                     cover_url: r.get::<_, Option<String>>(9)?,
                     purchase_date: r.get::<_, Option<String>>(10)?,
+                    first_seen_at: r.get::<_, i64>(11)?,
                     language: None,
-                    m4b_path: r.get::<_, Option<String>>(11)?,
-                    aaxc_path: r.get::<_, Option<String>>(12)?,
-                    status: r.get::<_, Option<String>>(13)?,
+                    m4b_path: r.get::<_, Option<String>>(12)?,
+                    aaxc_path: r.get::<_, Option<String>>(13)?,
+                    status: r.get::<_, Option<String>>(14)?,
                 })
             };
             let rows: Vec<BookRow> = if let Some(w) = where_param {
@@ -218,10 +221,11 @@ async fn item_detail(
                         runtime_length_ms: r.get::<_, Option<i64>>(8)?,
                         cover_url: r.get::<_, Option<String>>(9)?,
                         purchase_date: r.get::<_, Option<String>>(10)?,
+                        first_seen_at: r.get::<_, i64>(11)?,
                         language: None,
-                        m4b_path: r.get::<_, Option<String>>(11)?,
-                        aaxc_path: r.get::<_, Option<String>>(12)?,
-                        status: r.get::<_, Option<String>>(13)?,
+                        m4b_path: r.get::<_, Option<String>>(12)?,
+                        aaxc_path: r.get::<_, Option<String>>(13)?,
+                        status: r.get::<_, Option<String>>(14)?,
                     })
                 })
                 .map(Some)
@@ -340,6 +344,10 @@ struct BookRow {
     /// extra query.
     cover_url: Option<String>,
     purchase_date: Option<String>,
+    /// Unix seconds; multiplied by 1000 to produce the addedAt /
+    /// updatedAt fields ABS clients require. Sourced from
+    /// books.first_seen_at — stable per (asin, account_id) pair.
+    first_seen_at: i64,
     /// Audible language tag. Not currently stored in scribe's books
     /// table; left as None for now so the metadata response shape
     /// stays stable if/when scribe starts persisting it.
@@ -478,6 +486,8 @@ fn build_item(
         // Listen This branches on this for some metadata UI but doesn't
         // depend on it for streaming once it uses /file/{ino}.
         is_file: false,
+        added_at: b.first_seen_at.saturating_mul(1000),
+        updated_at: b.first_seen_at.saturating_mul(1000),
     }
 }
 
