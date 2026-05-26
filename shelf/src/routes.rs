@@ -126,13 +126,15 @@ async fn library_items(
                             b.first_seen_at,
                             j.m4b_path, j.aaxc_path, j.status
                      FROM books b
-                     LEFT JOIN (
+                     INNER JOIN (
                        SELECT asin, account_id, m4b_path, aaxc_path, status,
                               MAX(updated_at) AS up
-                       FROM jobs GROUP BY asin, account_id
+                       FROM jobs
+                       WHERE status = 'done' AND m4b_path IS NOT NULL
+                       GROUP BY asin, account_id
                      ) j ON j.asin = b.asin AND j.account_id = b.account_id
-                     WHERE lower(b.title) LIKE ?1
-                        OR lower(b.authors_json) LIKE ?1
+                     WHERE (lower(b.title) LIKE ?1
+                        OR lower(b.authors_json) LIKE ?1)
                      ORDER BY b.title COLLATE NOCASE ASC
                      LIMIT ?2 OFFSET ?3",
                     Some(format!("%{}%", s.to_lowercase())),
@@ -144,10 +146,12 @@ async fn library_items(
                             b.first_seen_at,
                             j.m4b_path, j.aaxc_path, j.status
                      FROM books b
-                     LEFT JOIN (
+                     INNER JOIN (
                        SELECT asin, account_id, m4b_path, aaxc_path, status,
                               MAX(updated_at) AS up
-                       FROM jobs GROUP BY asin, account_id
+                       FROM jobs
+                       WHERE status = 'done' AND m4b_path IS NOT NULL
+                       GROUP BY asin, account_id
                      ) j ON j.asin = b.asin AND j.account_id = b.account_id
                      ORDER BY b.title COLLATE NOCASE ASC
                      LIMIT ?1 OFFSET ?2",
@@ -188,7 +192,19 @@ async fn library_items(
     let total: u64 = state
         .db
         .with(move |c| {
-            let n: i64 = c.query_row("SELECT COUNT(*) FROM books", [], |r| r.get(0))?;
+            // Match the items query — only count rows we'd actually
+            // return. Stale unavailable/unconverted books are filtered
+            // out at SQL level so pagination math stays honest.
+            let n: i64 = c.query_row(
+                "SELECT COUNT(*) FROM books b
+                 INNER JOIN (
+                   SELECT asin, account_id FROM jobs
+                   WHERE status = 'done' AND m4b_path IS NOT NULL
+                   GROUP BY asin, account_id
+                 ) j ON j.asin = b.asin AND j.account_id = b.account_id",
+                [],
+                |r| r.get(0),
+            )?;
             Ok(n as u64)
         })
         .await?;
