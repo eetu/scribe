@@ -20,15 +20,30 @@ pub async fn bearer_guard(
     req: axum::extract::Request,
     next: Next,
 ) -> Result<Response, ShelfError> {
-    let header = req
+    // Prefer Authorization header. Fall back to ?token=... in the
+    // query string because AVFoundation (and any plain <video>/<audio>
+    // src) can't attach custom headers when AVURLAsset / AsyncImage
+    // fetches the file — token-in-URL is the only auth channel for
+    // those clients. ABS itself supports both modes for the same
+    // reason.
+    let header_token = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::to_string);
+    let query_token = req
+        .uri()
+        .query()
+        .and_then(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .find(|(k, _)| k == "token")
+                .map(|(_, v)| v.into_owned())
+        });
+    let token = header_token
+        .or(query_token)
         .ok_or(ShelfError::Unauthorized)?;
-    let token = header
-        .strip_prefix("Bearer ")
-        .ok_or(ShelfError::Unauthorized)?;
-    if !constant_time_eq(token, &state.cfg.api_key) {
+    if !constant_time_eq(&token, &state.cfg.api_key) {
         return Err(ShelfError::Unauthorized);
     }
     Ok(next.run(req).await)

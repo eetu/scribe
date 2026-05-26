@@ -21,3 +21,4 @@ futures-util = { workspace = true }
 dotenvy = { workspace = true }
 chrono = { workspace = true }
 subtle = "2"
+url = { workspace = true }
