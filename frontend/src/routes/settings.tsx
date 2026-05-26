@@ -39,8 +39,6 @@ function SettingsPage() {
     ["dev_auth", status.dev_auth ? "on" : "off"],
     ["library dir", status.library_dir],
     ["original dir", status.original_dir],
-    ["poll interval (min, default)", status.poll_interval_min_default],
-    ["auto_enqueue (default)", status.auto_enqueue_default ? "on" : "off"],
   ];
 
   return (
