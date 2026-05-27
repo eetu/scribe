@@ -85,8 +85,11 @@ impl Config {
             original_dir: env::var("SCRIBE_ORIGINAL_DIR")
                 .unwrap_or_else(|_| "/mnt/audiobooks/original".into())
                 .into(),
+            // Relative default mirrors SCRIBE_DB_PATH ("scribe.db") so local
+            // dev writes under the cwd; the container sets the absolute
+            // /data/covers explicitly (see raspi tasks/scribe.py).
             covers_dir: env::var("SCRIBE_COVERS_DIR")
-                .unwrap_or_else(|_| "/data/covers".into())
+                .unwrap_or_else(|_| "covers".into())
                 .into(),
             internal_url: env::var("SCRIBE_INTERNAL_URL")
                 .ok()

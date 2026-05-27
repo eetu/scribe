@@ -21,3 +21,5 @@ __pycache__/
 *.db-shm
 scribe.db*
 shim/data/
+# local-dev cover cache (SCRIBE_COVERS_DIR default)
+covers/
