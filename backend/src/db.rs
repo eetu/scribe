@@ -18,7 +18,7 @@ pub struct Db {
 /// Current schema version. Bump + add a migration block when shipping
 /// a schema change to a deployed instance. Anything from `0` is a fresh
 /// install and runs the full `SCHEMA` batch.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 impl Db {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
@@ -63,6 +63,9 @@ impl Db {
         }
         if current < 3 {
             conn.execute_batch(MIGRATION_V3)?;
+        }
+        if current < 4 {
+            conn.execute_batch(MIGRATION_V4)?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -109,6 +112,10 @@ CREATE TABLE books (
   status TEXT NOT NULL,
   purchase_date TEXT,
   first_seen_at INTEGER NOT NULL,
+  codec TEXT,
+  bitrate_kbps INTEGER,
+  sample_rate INTEGER,
+  channels INTEGER,
   PRIMARY KEY (asin, account_id)
 );
 CREATE INDEX idx_books_account ON books(account_id);
@@ -150,4 +157,14 @@ CREATE TABLE IF NOT EXISTS removed_books (
   removed_at INTEGER NOT NULL,
   PRIMARY KEY (asin, account_id)
 );
+"#;
+
+// Per-book audio quality, probed from the converted m4b (we never
+// transcode, so the file's specs equal the delivered tier). Lets the UI
+// flag the higher-bitrate copy when the same title exists as a dupe.
+const MIGRATION_V4: &str = r#"
+ALTER TABLE books ADD COLUMN codec TEXT;
+ALTER TABLE books ADD COLUMN bitrate_kbps INTEGER;
+ALTER TABLE books ADD COLUMN sample_rate INTEGER;
+ALTER TABLE books ADD COLUMN channels INTEGER;
 "#;

@@ -16,6 +16,9 @@ type Props = {
    * Surfaced as a small "dupe" badge so the user can decide whether to
    * download both editions or skip one. Empty when no overlap. */
   duplicateOf?: string[];
+  /** If a dupe sibling has a higher bitrate, the better value (kbps);
+   * tints this card's quality badge so the worse copy stands out. */
+  dupeBetterKbps?: number;
   /** Marketplace locale of the account this row belongs to ("us", "uk").
    * Rendered as a small badge so users with multi-region accounts can
    * tell editions apart at a glance. Undefined hides the badge. */
@@ -41,6 +44,7 @@ export default function BookCard({
   onReconvert,
   onRemove,
   duplicateOf = [],
+  dupeBetterKbps,
   region,
   canPlay = false,
   isPlaying = false,
@@ -152,6 +156,38 @@ export default function BookCard({
             }}
           >
             {region}
+          </span>
+        )}
+        {book.bitrate_kbps != null && (
+          <span
+            title={`${book.bitrate_kbps} kbps${
+              book.channels === 1
+                ? " · mono"
+                : book.channels === 2
+                  ? " · stereo"
+                  : ""
+            }${
+              dupeBetterKbps
+                ? ` — a higher-quality copy is in your library (${dupeBetterKbps} kbps)`
+                : ""
+            }`}
+            css={{
+              position: "absolute",
+              top: 6,
+              right: 6,
+              fontFamily: theme.fonts.heading,
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "1px 6px",
+              borderRadius: 3,
+              letterSpacing: "0.04em",
+              background: "rgba(0, 0, 0, 0.55)",
+              color: dupeBetterKbps ? theme.colors.activity.on : "#fff",
+              pointerEvents: "none",
+            }}
+          >
+            {dupeBetterKbps ? "↓" : ""}
+            {book.bitrate_kbps}k
           </span>
         )}
         {canPlay && onTogglePlay && (

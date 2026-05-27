@@ -57,6 +57,12 @@ export type Book = {
   /** Audible's total runtime in ms; the preview player's seek
    * denominator (a streamed <audio>.duration can be Infinity). */
   runtime_length_ms: number | null;
+  /** Audio quality probed from the converted m4b (no transcode, so it's
+   * the delivered tier). null until converted + probed. */
+  codec: string | null;
+  bitrate_kbps: number | null;
+  sample_rate: number | null;
+  channels: number | null;
 };
 
 export type Job = {

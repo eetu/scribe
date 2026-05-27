@@ -358,7 +358,8 @@ async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppRe
         .with(move |c| {
             let mut stmt = c.prepare(
                 "SELECT b.asin, b.account_id, b.title, b.authors_json, b.cover_url,
-                        b.status, b.purchase_date, a.locale, b.runtime_length_ms
+                        b.status, b.purchase_date, a.locale, b.runtime_length_ms,
+                        b.codec, b.bitrate_kbps, b.sample_rate, b.channels
                  FROM books b
                  JOIN accounts a ON a.id = b.account_id
                  WHERE a.profile_id = ?1
@@ -383,6 +384,13 @@ async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppRe
                         // player uses it as a finite seek denominator
                         // since a streamed <audio>.duration can be Infinity.
                         "runtime_length_ms": r.get::<_, Option<i64>>(8)?,
+                        // Audio quality probed from the m4b (we don't
+                        // transcode, so it's the delivered tier). null
+                        // until the book is converted + probed.
+                        "codec": r.get::<_, Option<String>>(9)?,
+                        "bitrate_kbps": r.get::<_, Option<i64>>(10)?,
+                        "sample_rate": r.get::<_, Option<i64>>(11)?,
+                        "channels": r.get::<_, Option<i64>>(12)?,
                     }))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

@@ -189,6 +189,21 @@ function LibraryPage() {
     if (peers.length > 0) dupesByAsin.set(b.asin, peers);
   }
 
+  // Among dupes, flag the copies that have a higher-bitrate sibling so the
+  // user can prefer the better edition. Only meaningful once both probed.
+  const byAsin = new Map(items.map((b) => [b.asin, b]));
+  const betterDupeKbps = new Map<string, number>();
+  for (const b of items) {
+    const peers = dupesByAsin.get(b.asin);
+    if (!peers || b.bitrate_kbps == null) continue;
+    let best = b.bitrate_kbps;
+    for (const peerAsin of peers) {
+      const k = byAsin.get(peerAsin)?.bitrate_kbps;
+      if (k != null && k > best) best = k;
+    }
+    if (best > b.bitrate_kbps) betterDupeKbps.set(b.asin, best);
+  }
+
   const buckets = new Map<string, Exclude<FilterKey, "all">>();
   for (const b of items) {
     buckets.set(b.asin, bucket(jobByAsin.get(b.asin) ?? null));
@@ -406,6 +421,7 @@ function LibraryPage() {
             book={b}
             job={jobByAsin.get(b.asin) ?? null}
             duplicateOf={dupesByAsin.get(b.asin)}
+            dupeBetterKbps={betterDupeKbps.get(b.asin)}
             region={b.region}
             canPlay={shelfReady && buckets.get(b.asin) === "done"}
             isPlaying={playingAsin === b.asin}

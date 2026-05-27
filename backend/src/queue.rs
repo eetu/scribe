@@ -385,6 +385,8 @@ impl Inner {
                 Ok(())
             })
             .await?;
+        // Probe + record audio quality from the finished m4b (non-fatal).
+        crate::quality::capture(&self.state, job_id, m4b).await;
         let tx = self.channel(job_id).await;
         let _ = tx.send(QueueEvent::Done {
             m4b_path: m4b.to_string(),

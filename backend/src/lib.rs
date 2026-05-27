@@ -9,6 +9,7 @@ pub mod pipeline;
 pub mod poller;
 pub mod press;
 pub mod profile;
+pub mod quality;
 pub mod queue;
 pub mod reconcile;
 pub mod reconvert;
@@ -118,6 +119,7 @@ pub async fn run_server() -> anyhow::Result<()> {
     poller::spawn(state.clone());
     reconcile::spawn_boot_scan(state.clone());
     covers::spawn_boot_cache(state.clone());
+    quality::spawn_boot_backfill(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!(bind = %cfg.bind, dev_auth = cfg.dev_auth, "scribe listening");
