@@ -61,9 +61,9 @@ impl Db {
                 }
             }
         }
-        if current < 3 {
-            conn.execute_batch(MIGRATION_V3)?;
-        }
+        // CREATE TABLE IF NOT EXISTS — run unconditionally so a DB whose
+        // user_version was bumped before this table existed self-heals.
+        conn.execute_batch(MIGRATION_V3)?;
         // v4 quality columns: add-if-missing, run unconditionally so a DB
         // whose user_version was bumped before the columns existed still
         // self-heals (column adds are idempotent, never destructive).
