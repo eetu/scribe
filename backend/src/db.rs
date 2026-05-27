@@ -15,9 +15,13 @@ pub struct Db {
     inner: Arc<Mutex<Connection>>,
 }
 
-/// Current schema version. Bump + add a migration block when shipping
-/// a schema change to a deployed instance. Anything from `0` is a fresh
-/// install and runs the full `SCHEMA` batch.
+/// Informational schema marker, stamped into `user_version`. Migrations
+/// no longer *gate* on it — the whole schema is declarative + idempotent
+/// (every statement is CREATE/ADD/DROP IF (NOT) EXISTS), so it's applied
+/// on every boot. That makes drift impossible: a watch-runner like bacon
+/// can restart mid-edit and advance the version before the matching DDL
+/// is written, but the next boot still converges the schema to match the
+/// code regardless of what the version says.
 const SCHEMA_VERSION: i64 = 4;
 
 impl Db {
@@ -38,35 +42,15 @@ impl Db {
     }
 
     fn migrate(conn: &Connection) -> anyhow::Result<()> {
-        let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if current < 1 {
-            conn.execute_batch(SCHEMA)?;
-        }
-        if current < 2 {
-            // Drop role + display_name columns introduced in the original
-            // v1 schema. kanidm is the bouncer — scribe doesn't need an
-            // admin/user split. SQLite 3.35+ supports DROP COLUMN; bundled
-            // rusqlite 0.39 ships 3.49.
-            for stmt in [
-                "ALTER TABLE profile DROP COLUMN role",
-                "ALTER TABLE profile DROP COLUMN display_name",
-            ] {
-                if let Err(e) = conn.execute(stmt, []) {
-                    // Already absent on fresh installs that hit the v2
-                    // baseline (see SCHEMA below) — swallow and continue.
-                    let msg = e.to_string();
-                    if !msg.contains("no such column") {
-                        return Err(e.into());
-                    }
-                }
-            }
-        }
-        // CREATE TABLE IF NOT EXISTS — run unconditionally so a DB whose
-        // user_version was bumped before this table existed self-heals.
-        conn.execute_batch(MIGRATION_V3)?;
-        // v4 quality columns: add-if-missing, run unconditionally so a DB
-        // whose user_version was bumped before the columns existed still
-        // self-heals (column adds are idempotent, never destructive).
+        // Declarative + idempotent — safe to run every boot, converges the
+        // schema to match the code regardless of `user_version`.
+
+        // Tables + indexes (all CREATE ... IF NOT EXISTS).
+        conn.execute_batch(SCHEMA)?;
+
+        // Columns added to existing tables after the original baseline.
+        // CREATE TABLE IF NOT EXISTS won't alter a table that already
+        // exists, so these add-if-missing for upgraded DBs.
         for (col, decl) in [
             ("codec", "TEXT"),
             ("bitrate_kbps", "INTEGER"),
@@ -75,6 +59,14 @@ impl Db {
         ] {
             add_column_if_missing(conn, "books", col, decl)?;
         }
+
+        // Legacy columns from the pre-kanidm schema (admin/user split) —
+        // dropped now that kanidm is the bouncer. Existence-checked so
+        // this is a no-op on fresh installs and after the first drop.
+        for col in ["role", "display_name"] {
+            drop_column_if_exists(conn, "profile", col)?;
+        }
+
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
@@ -89,34 +81,54 @@ fn add_column_if_missing(
     column: &str,
     decl: &str,
 ) -> anyhow::Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let exists = stmt
-        .query_map([], |r| r.get::<_, String>(1))?
-        .filter_map(Result::ok)
-        .any(|name| name == column);
-    if !exists {
+    if !column_exists(conn, table, column)? {
         conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"), [])?;
     }
     Ok(())
 }
 
+/// Idempotent `ALTER TABLE DROP COLUMN` — no-ops when the column is
+/// already gone. Hardcoded identifiers, so the inline format is safe.
+fn drop_column_if_exists(conn: &Connection, table: &str, column: &str) -> anyhow::Result<()> {
+    if column_exists(conn, table, column)? {
+        conn.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), [])?;
+    }
+    Ok(())
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let found = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .any(|name| name == column);
+    Ok(found)
+}
+
+// Full declarative schema. Every statement is idempotent so the whole
+// batch runs on every boot (see `migrate`). `removed_books` is the
+// tombstone for user-removed books: the row is gone but a leftover
+// `*.scribe.json` sidecar (kept on disk for its durable voucher) would
+// otherwise let the boot reconcile pass resurrect the job — reconcile
+// skips tombstoned asins, while library sync clears the tombstone if
+// Audible lists the title again (a genuine re-purchase).
 const SCHEMA: &str = r#"
-CREATE TABLE profile (
+CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_sub TEXT UNIQUE,
   email TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX idx_profile_sub ON profile(user_sub);
+CREATE INDEX IF NOT EXISTS idx_profile_sub ON profile(user_sub);
 
-CREATE TABLE profile_settings (
+CREATE TABLE IF NOT EXISTS profile_settings (
   profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
   key TEXT NOT NULL,
   value TEXT NOT NULL,
   PRIMARY KEY (profile_id, key)
 );
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
   profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
   locale TEXT NOT NULL,
@@ -124,9 +136,9 @@ CREATE TABLE accounts (
   customer_name TEXT,
   last_synced_at INTEGER
 );
-CREATE INDEX idx_accounts_profile ON accounts(profile_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_profile ON accounts(profile_id);
 
-CREATE TABLE books (
+CREATE TABLE IF NOT EXISTS books (
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -146,10 +158,10 @@ CREATE TABLE books (
   channels INTEGER,
   PRIMARY KEY (asin, account_id)
 );
-CREATE INDEX idx_books_account ON books(account_id);
-CREATE INDEX idx_books_purchase ON books(purchase_date);
+CREATE INDEX IF NOT EXISTS idx_books_account ON books(account_id);
+CREATE INDEX IF NOT EXISTS idx_books_purchase ON books(purchase_date);
 
-CREATE TABLE jobs (
+CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL,
@@ -160,25 +172,9 @@ CREATE TABLE jobs (
   m4b_path TEXT,
   aaxc_path TEXT
 );
-CREATE INDEX idx_jobs_status ON jobs(status);
-CREATE INDEX idx_jobs_account ON jobs(account_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_account ON jobs(account_id);
 
-CREATE TABLE removed_books (
-  asin TEXT NOT NULL,
-  account_id TEXT NOT NULL,
-  removed_at INTEGER NOT NULL,
-  PRIMARY KEY (asin, account_id)
-);
-"#;
-
-// Tombstone for user-removed books. Distinct from a deleted books row:
-// the row is gone, but a leftover `*.scribe.json` sidecar (which we keep
-// on disk because it holds the durable voucher) would otherwise let the
-// boot reconcile pass resurrect the job. Reconcile consults this table
-// and skips tombstoned asins. Library sync deliberately does NOT — if
-// Audible lists the title again (a genuine re-purchase) the tombstone is
-// cleared in `sync::upsert` and the book returns.
-const MIGRATION_V3: &str = r#"
 CREATE TABLE IF NOT EXISTS removed_books (
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL,
