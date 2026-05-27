@@ -64,12 +64,40 @@ impl Db {
         if current < 3 {
             conn.execute_batch(MIGRATION_V3)?;
         }
-        if current < 4 {
-            conn.execute_batch(MIGRATION_V4)?;
+        // v4 quality columns: add-if-missing, run unconditionally so a DB
+        // whose user_version was bumped before the columns existed still
+        // self-heals (column adds are idempotent, never destructive).
+        for (col, decl) in [
+            ("codec", "TEXT"),
+            ("bitrate_kbps", "INTEGER"),
+            ("sample_rate", "INTEGER"),
+            ("channels", "INTEGER"),
+        ] {
+            add_column_if_missing(conn, "books", col, decl)?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
+}
+
+/// Idempotent `ALTER TABLE ADD COLUMN` — checks `table_info` first, so it
+/// no-ops when the column already exists. Table/column names are
+/// hardcoded literals (never user input), so the inline format is safe.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> anyhow::Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .any(|name| name == column);
+    if !exists {
+        conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"), [])?;
+    }
+    Ok(())
 }
 
 const SCHEMA: &str = r#"
@@ -159,12 +187,3 @@ CREATE TABLE IF NOT EXISTS removed_books (
 );
 "#;
 
-// Per-book audio quality, probed from the converted m4b (we never
-// transcode, so the file's specs equal the delivered tier). Lets the UI
-// flag the higher-bitrate copy when the same title exists as a dupe.
-const MIGRATION_V4: &str = r#"
-ALTER TABLE books ADD COLUMN codec TEXT;
-ALTER TABLE books ADD COLUMN bitrate_kbps INTEGER;
-ALTER TABLE books ADD COLUMN sample_rate INTEGER;
-ALTER TABLE books ADD COLUMN channels INTEGER;
-"#;
