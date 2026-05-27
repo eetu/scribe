@@ -55,6 +55,11 @@ pub async fn run(
     // 1. resolve content URL + DRM
     let src = resolve_source(&shim, &input).await?;
 
+    // Persist chapters (from the voucher) up front so the shelf sidecar
+    // can emit ABS media.chapters; without them Listen This falls back to
+    // one-chapter-per-track and shows the whole book as a single chapter.
+    crate::chapters::store(state, &input.account_id, &input.asin, &src.chapters).await;
+
     // Cache the voucher / activation bytes before they move into the
     // press job request — needed later for the sidecar so a future
     // reconvert can decrypt the local AAXC without re-fetching from
@@ -228,6 +233,7 @@ struct ResolvedSource {
     subtitle: Option<String>,
     narrators: Vec<String>,
     release_date: Option<String>,
+    chapters: Vec<crate::shim::ChapterEntry>,
 }
 
 async fn resolve_source(
@@ -271,6 +277,7 @@ async fn resolve_source(
         subtitle: book.subtitle,
         narrators: book.narrators,
         release_date: book.release_date,
+        chapters: voucher.chapters,
     })
 }
 

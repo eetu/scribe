@@ -183,6 +183,7 @@ async fn library_items(
                     m4b_path: r.get::<_, Option<String>>(12)?,
                     aaxc_path: r.get::<_, Option<String>>(13)?,
                     status: r.get::<_, Option<String>>(14)?,
+                    chapters_json: r.get::<_, Option<String>>(15)?,
                 })
             };
             let rows: Vec<BookRow> = if let Some(w) = where_param {
@@ -253,7 +254,7 @@ async fn item_detail(
                         b.narrators_json, b.series_title, b.series_sequence,
                         b.runtime_length_ms, b.cover_url, b.purchase_date,
                         b.first_seen_at,
-                        j.m4b_path, j.aaxc_path, j.status
+                        j.m4b_path, j.aaxc_path, j.status, b.chapters_json
                  FROM books b
                  LEFT JOIN (
                    SELECT asin, account_id, m4b_path, aaxc_path, status,
@@ -281,6 +282,7 @@ async fn item_detail(
                         m4b_path: r.get::<_, Option<String>>(12)?,
                         aaxc_path: r.get::<_, Option<String>>(13)?,
                         status: r.get::<_, Option<String>>(14)?,
+                    chapters_json: r.get::<_, Option<String>>(15)?,
                     })
                 })
                 .map(Some)
@@ -437,6 +439,28 @@ struct BookRow {
     /// surface per-item job state, but kept for the inevitable future
     /// scribe-native endpoints that will.
     status: Option<String>,
+    /// JSON array of `scribe_shared::Chapter` persisted by scribe, or
+    /// None when not yet probed. Emitted as ABS `media.chapters`.
+    chapters_json: Option<String>,
+}
+
+/// Parse the stored chapters JSON into ABS chapter objects (seconds).
+fn parse_chapters(json: Option<&str>) -> Vec<abs::Chapter> {
+    let Some(raw) = json else { return Vec::new() };
+    let parsed: Vec<scribe_shared::Chapter> = serde_json::from_str(raw).unwrap_or_default();
+    parsed
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let start = c.start_offset_ms as f64 / 1000.0;
+            abs::Chapter {
+                id: i as u32,
+                start,
+                end: start + c.length_ms as f64 / 1000.0,
+                title: c.title,
+            }
+        })
+        .collect()
 }
 
 fn library_id(name: &str) -> String {
@@ -482,6 +506,7 @@ fn build_item(
     let authors: Vec<String> = serde_json::from_str(&b.authors_json).unwrap_or_default();
     let narrators: Vec<String> = serde_json::from_str(&b.narrators_json).unwrap_or_default();
     let duration_sec = b.runtime_length_ms.unwrap_or(0) as f64 / 1000.0;
+    let chapters = parse_chapters(b.chapters_json.as_deref());
     let m4b_present = b
         .m4b_path
         .as_deref()
@@ -656,13 +681,13 @@ fn build_item(
             cover_path,
             tags: Vec::new(),
             audio_files,
-            chapters: Vec::new(),
+            num_chapters: chapters.len() as u32,
+            chapters,
             tracks,
             duration: duration_sec,
             size,
             num_tracks: if m4b_present { 1 } else { 0 },
             num_audio_files: if m4b_present { 1 } else { 0 },
-            num_chapters: 0,
             ebook_format: None,
             ebook_file: None,
         },

@@ -56,6 +56,7 @@ impl Db {
             ("bitrate_kbps", "INTEGER"),
             ("sample_rate", "INTEGER"),
             ("channels", "INTEGER"),
+            ("chapters_json", "TEXT"),
         ] {
             add_column_if_missing(conn, "books", col, decl)?;
         }
@@ -156,6 +157,7 @@ CREATE TABLE IF NOT EXISTS books (
   bitrate_kbps INTEGER,
   sample_rate INTEGER,
   channels INTEGER,
+  chapters_json TEXT,
   PRIMARY KEY (asin, account_id)
 );
 CREATE INDEX IF NOT EXISTS idx_books_account ON books(account_id);

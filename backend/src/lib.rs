@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod chapters;
 pub mod config;
 pub mod covers;
 pub mod db;
@@ -120,6 +121,7 @@ pub async fn run_server() -> anyhow::Result<()> {
     reconcile::spawn_boot_scan(state.clone());
     covers::spawn_boot_cache(state.clone());
     quality::spawn_boot_backfill(state.clone());
+    chapters::spawn_boot_backfill(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!(bind = %cfg.bind, dev_auth = cfg.dev_auth, "scribe listening");

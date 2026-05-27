@@ -79,6 +79,14 @@ pub struct ChapterEntry {
     pub length_ms: u64,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MetadataResp {
+    #[serde(default)]
+    pub chapters: Vec<ChapterEntry>,
+    #[serde(default)]
+    pub runtime_length_ms: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct LoginStartReq<'a> {
     pub locale: &'a str,
@@ -188,6 +196,19 @@ impl<'a> ShimClient<'a> {
                 .unwrap_or_else(|_| "license denied".into());
             return Err(AppError::LicenseDenied(detail));
         }
+        Ok(r.error_for_status()?.json().await?)
+    }
+
+    /// Chapter + runtime metadata for a title. Unlike `voucher`, this
+    /// works even for license-revoked books (metadata is not gated by the
+    /// license), so it's the chapter backfill source for older rescues.
+    pub async fn metadata(&self, account_id: &str, asin: &str) -> Result<MetadataResp, AppError> {
+        let r = self
+            .state
+            .http
+            .get(self.url(&format!("/accounts/{account_id}/books/{asin}/metadata")))
+            .send()
+            .await?;
         Ok(r.error_for_status()?.json().await?)
     }
 }

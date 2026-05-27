@@ -702,6 +702,7 @@ async fn refresh_book(
             let _ = crate::covers::fetch_and_store(&state, &asin, url).await;
         }
         crate::quality::reprobe(&state, &asin, account).await;
+        crate::chapters::refetch(&state, account, &asin).await;
     }
     Ok(Json(json!({ "refreshed": rows.len() })))
 }
@@ -734,6 +735,7 @@ async fn refresh_library(
         }
         crate::covers::recache_owned(&st, pid).await;
         crate::quality::reprobe_owned(&st, pid).await;
+        crate::chapters::refetch_owned(&st, pid).await;
         tracing::info!(profile = pid, "library refresh complete");
     });
     Ok(Json(json!({ "started": true })))
