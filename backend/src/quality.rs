@@ -250,6 +250,65 @@ async fn persist(state: &AppState, asin: &str, account: &str, m4b_path: &str) {
         .await;
 }
 
+/// Force a re-probe of one book's done m4b (used by refresh). No-op when
+/// the book has no done m4b on file.
+pub async fn reprobe(state: &AppState, asin: &str, account: &str) {
+    let (a, ac) = (asin.to_string(), account.to_string());
+    let m4b: Option<String> = state
+        .db
+        .with(move |c| {
+            c.query_row(
+                "SELECT m4b_path FROM jobs
+                 WHERE asin = ?1 AND account_id = ?2 AND status = 'done' AND m4b_path IS NOT NULL
+                 ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::params![a, ac],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+        })
+        .await
+        .unwrap_or(None);
+    if let Some(p) = m4b {
+        persist(state, asin, account, &p).await;
+    }
+}
+
+/// Force a re-probe across every done book a profile owns (global
+/// refresh). Trickled; per-book errors are non-fatal.
+pub async fn reprobe_owned(state: &AppState, profile_id: i64) {
+    let rows: Vec<(String, String, String)> = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT b.asin, b.account_id, j.m4b_path
+                 FROM books b
+                 JOIN accounts a ON a.id = b.account_id
+                 JOIN jobs j ON j.asin = b.asin AND j.account_id = b.account_id
+                 WHERE a.profile_id = ?1
+                   AND j.status = 'done' AND j.m4b_path IS NOT NULL
+                 GROUP BY b.asin, b.account_id",
+            )?;
+            let v = stmt
+                .query_map([profile_id], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap_or_default();
+    for (asin, account, m4b) in rows {
+        if tokio::fs::try_exists(&m4b).await.unwrap_or(false) {
+            persist(state, &asin, &account, &m4b).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
 /// Boot pass: backfill quality for any done book that has an m4b on disk
 /// but no probed bitrate yet (pre-existing library, or rows that predate
 /// this feature). Trickles to keep the 1 GB Pi calm; detached + per-book

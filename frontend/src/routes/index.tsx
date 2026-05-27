@@ -68,6 +68,9 @@ function LibraryPage() {
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("title");
+  // Per-asin cache-buster so a refreshed cover reloads past the browser's
+  // long-lived image cache (the cover endpoint sets max-age).
+  const [coverBust, setCoverBust] = useState<Record<string, number>>({});
 
   // Single shared <audio> for the preview player so only one book ever
   // plays at a time. Sourced from the shelf sidecar; the feature hides
@@ -337,15 +340,23 @@ function LibraryPage() {
             onClick={async () => {
               setSyncing(true);
               try {
-                await api.syncLibrary({ full: true });
-                mutate("/api/library");
-                // Also re-stat job rows so missing-file detection
-                // surfaces immediately instead of waiting for the
-                // next 5s SWR tick.
-                mutate("/api/jobs");
+                // Full refresh: re-syncs metadata, then re-caches covers
+                // and re-probes quality in the background on the Pi.
+                await api.refreshLibrary();
               } finally {
                 setSyncing(false);
               }
+              // Bust every cover so rotated art reloads, and refetch as
+              // the background pass lands (metadata first, then derived).
+              setCoverBust(
+                Object.fromEntries(items.map((b) => [b.asin, Date.now()])),
+              );
+              mutate("/api/library");
+              mutate("/api/jobs");
+              setTimeout(() => {
+                mutate("/api/library");
+                mutate("/api/jobs");
+              }, 4000);
             }}
             disabled={syncing}
             css={{
@@ -428,6 +439,17 @@ function LibraryPage() {
             progress={playingAsin === b.asin ? progress : 0}
             onTogglePlay={() => togglePlay(b)}
             onScrub={(f) => scrubTo(b, f)}
+            coverBust={coverBust[b.asin]}
+            onRefresh={
+              buckets.get(b.asin) === "done"
+                ? async () => {
+                    await api.refreshBook(b.asin);
+                    setCoverBust((prev) => ({ ...prev, [b.asin]: Date.now() }));
+                    mutate("/api/library");
+                    mutate("/api/jobs");
+                  }
+                : undefined
+            }
             onDownload={async () => {
               await api.enqueueJob({ account_id: b.account_id, asin: b.asin });
               mutate("/api/jobs");

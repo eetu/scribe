@@ -107,6 +107,36 @@ pub async fn ensure_cached(state: &AppState, asin: &str, cover_url: Option<&str>
     }
 }
 
+/// Force a re-fetch of every cover a profile owns (global refresh) —
+/// picks up a cover URL that rotated since the last cache. fetch_and_store
+/// overwrites in place; trickled, per-cover errors non-fatal.
+pub async fn recache_owned(state: &AppState, profile_id: i64) {
+    let rows: Vec<(String, Option<String>)> = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT b.asin, b.cover_url FROM books b
+                 JOIN accounts a ON a.id = b.account_id
+                 WHERE a.profile_id = ?1 AND b.cover_url IS NOT NULL",
+            )?;
+            let v = stmt
+                .query_map([profile_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap_or_default();
+    for (asin, url) in rows {
+        let Some(url) = url.as_deref() else { continue };
+        if let Err(e) = fetch_and_store(state, &asin, url).await {
+            tracing::debug!(asin, error = ?e, "cover recache miss");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// Boot-time pass: mirror every book's CDN cover to disk so the cache is
 /// populated before Amazon can pull any of them. Skips already-cached
 /// asins and trickles requests so a cold start on the 1 GB Pi doesn't

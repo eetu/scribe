@@ -35,6 +35,12 @@ type Props = {
   /** Seek the active book to a 0..1 fraction. Wired to the ring as a
    * mouse-only scrub (the ring expands on hover); touch never scrubs. */
   onScrub?: (fraction: number) => void;
+  /** Re-fetch this book's cover + re-probe quality. Provided for done
+   * books; renders a small "refresh" action. */
+  onRefresh?: () => void;
+  /** Cache-buster appended to the cover URL so a just-refreshed cover
+   * reloads past the browser's long-lived image cache. */
+  coverBust?: number;
 };
 
 export default function BookCard({
@@ -51,9 +57,14 @@ export default function BookCard({
   progress = 0,
   onTogglePlay,
   onScrub,
+  onRefresh,
+  coverBust,
 }: Props) {
   const theme = useTheme();
   const status = jobStatus(job);
+  const coverSrc = coverBust
+    ? `${coverUrl(book.asin)}?v=${coverBust}`
+    : coverUrl(book.asin);
   const isDuplicate = duplicateOf.length > 0;
 
   // Mouse-only scrub: map a pointer position on the ring to a 0..1
@@ -126,7 +137,7 @@ export default function BookCard({
       >
         {book.cover_url ? (
           <img
-            src={coverUrl(book.asin)}
+            src={coverSrc}
             alt=""
             css={{ width: "100%", height: "100%", objectFit: "cover" }}
             loading="lazy"
@@ -358,6 +369,15 @@ export default function BookCard({
             )}
           </div>
           <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                css={mutedButton(theme)}
+                title="re-fetch cover + re-probe quality"
+              >
+                refresh
+              </button>
+            )}
             <button
               onClick={onRemove}
               css={removeButton(theme)}
@@ -445,6 +465,23 @@ function removeButton(theme: ReturnType<typeof useTheme>) {
     flexShrink: 0,
     "&:hover": {
       color: theme.colors.error,
+    },
+  } as const;
+}
+
+function mutedButton(theme: ReturnType<typeof useTheme>) {
+  return {
+    background: "transparent",
+    border: "none",
+    padding: "3px 4px",
+    fontFamily: theme.fonts.heading,
+    fontSize: 11,
+    color: theme.colors.text.muted,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    "&:hover": {
+      color: theme.colors.activity.on,
     },
   } as const;
 }

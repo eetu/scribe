@@ -48,8 +48,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/library", get(list_library))
         .route("/api/library/sync", post(sync_library))
         .route("/api/library/reconcile", post(reconcile_route))
+        .route("/api/library/refresh", post(refresh_library))
         .route("/api/books/{asin}", delete(remove_book))
         .route("/api/books/{asin}/cover", get(book_cover))
+        .route("/api/books/{asin}/refresh", post(refresh_book))
         .route("/api/jobs", get(list_jobs).post(enqueue_job))
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
@@ -663,6 +665,78 @@ async fn remove_book(
         "books_deleted": books_deleted,
         "jobs_deleted": jobs_deleted,
     })))
+}
+
+/// Refresh one book in place: force a fresh cover download (a CDN URL may
+/// have rotated) and re-probe the m4b's quality, for every account the
+/// caller owns that holds this asin. Cheap, no Audible catalog call —
+/// metadata refresh is the global pass below.
+async fn refresh_book(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Path(asin): Path<String>,
+) -> AppResult<Json<Value>> {
+    let pid = user.id();
+    let asin_q = asin.clone();
+    let rows: Vec<(String, Option<String>)> = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT b.account_id, b.cover_url FROM books b
+                 JOIN accounts a ON a.id = b.account_id
+                 WHERE b.asin = ?1 AND a.profile_id = ?2",
+            )?;
+            let v = stmt
+                .query_map(rusqlite::params![asin_q, pid], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+        .await?;
+    if rows.is_empty() {
+        return Err(AppError::NotFound);
+    }
+    for (account, cover_url) in &rows {
+        if let Some(url) = cover_url {
+            let _ = crate::covers::fetch_and_store(&state, &asin, url).await;
+        }
+        crate::quality::reprobe(&state, &asin, account).await;
+    }
+    Ok(Json(json!({ "refreshed": rows.len() })))
+}
+
+/// Global refresh: re-sync every owned account's catalog metadata from
+/// Audible (fresh titles, series, cover URLs), then force-recache all
+/// covers and re-probe all quality. Runs detached on the 1 GB Pi —
+/// returns immediately; progress shows up as the library refetches.
+async fn refresh_library(
+    user: AuthProfile,
+    State(state): State<AppState>,
+) -> AppResult<Json<Value>> {
+    let pid = user.id();
+    let accounts: Vec<String> = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
+            let v = stmt
+                .query_map([pid], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+        .await?;
+    let st = state.clone();
+    tokio::spawn(async move {
+        for acct in &accounts {
+            if let Err(e) = sync::full(&st, acct).await {
+                tracing::warn!(account = %acct, error = ?e, "refresh sync failed");
+            }
+        }
+        crate::covers::recache_owned(&st, pid).await;
+        crate::quality::reprobe_owned(&st, pid).await;
+        tracing::info!(profile = pid, "library refresh complete");
+    });
+    Ok(Json(json!({ "started": true })))
 }
 
 /// Serve a book's cover from the local disk cache, lazily mirroring it

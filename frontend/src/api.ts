@@ -190,6 +190,13 @@ export const api = {
       `/api/books/${encodeURIComponent(asin)}`,
       { method: "DELETE" },
     ),
+  refreshBook: (asin: string) =>
+    req<{ refreshed: number }>(
+      `/api/books/${encodeURIComponent(asin)}/refresh`,
+      { method: "POST" },
+    ),
+  refreshLibrary: () =>
+    req<{ started: boolean }>("/api/library/refresh", { method: "POST" }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
   settings: () => req<Settings>("/api/settings"),
   patchSettings: (body: Record<string, string>) =>
