@@ -130,7 +130,7 @@ async fn library_items(
                             b.narrators_json, b.series_title, b.series_sequence,
                             b.runtime_length_ms, b.cover_url, b.purchase_date,
                             b.first_seen_at,
-                            j.m4b_path, j.aaxc_path, j.status
+                            j.m4b_path, j.aaxc_path, j.status, b.chapters_json
                      FROM books b
                      INNER JOIN (
                        SELECT asin, account_id, m4b_path, aaxc_path, status,
@@ -150,7 +150,7 @@ async fn library_items(
                             b.narrators_json, b.series_title, b.series_sequence,
                             b.runtime_length_ms, b.cover_url, b.purchase_date,
                             b.first_seen_at,
-                            j.m4b_path, j.aaxc_path, j.status
+                            j.m4b_path, j.aaxc_path, j.status, b.chapters_json
                      FROM books b
                      INNER JOIN (
                        SELECT asin, account_id, m4b_path, aaxc_path, status,
