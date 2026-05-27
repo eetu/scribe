@@ -29,22 +29,31 @@ use state::AppState;
 
 /// Content-Security-Policy applied to every response.
 ///
-/// Cover art comes from Audible's CDN (`m.media-amazon.com` and family), so
-/// `img-src` includes Amazon hosts. Connections are kept same-origin —
-/// the vite dev server proxies API + auth + status through, and in
-/// production Caddy fronts everything on one origin.
-const CSP: &str = concat!(
-    "default-src 'self'; ",
-    "script-src 'self'; ",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ",
-    "font-src 'self' data: https://fonts.gstatic.com; ",
-    "img-src 'self' data: blob: https://*.media-amazon.com https://m.media-amazon.com; ",
-    "connect-src 'self'; ",
-    "frame-ancestors 'none'; ",
-    "base-uri 'self'; ",
-    "object-src 'none'; ",
-    "form-action 'self'",
-);
+/// Cover art is now proxied same-origin, but `img-src` keeps the Amazon
+/// hosts as a harmless fallback. `media-src` allows the optional shelf
+/// origin so the library page can stream a book preview straight from
+/// the shelf sidecar (cross-origin `<audio>`) — omitted when shelf is
+/// unset. Everything else stays same-origin; Caddy fronts one origin in
+/// prod and the vite dev server proxies api/auth/status through.
+fn build_csp(shelf_url: Option<&str>) -> String {
+    let media = match shelf_url {
+        Some(u) => format!("media-src 'self' {}; ", u.trim_end_matches('/')),
+        None => "media-src 'self'; ".to_string(),
+    };
+    format!(
+        "default-src 'self'; \
+         script-src 'self'; \
+         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+         font-src 'self' data: https://fonts.gstatic.com; \
+         img-src 'self' data: blob: https://*.media-amazon.com https://m.media-amazon.com; \
+         connect-src 'self'; \
+         {media}\
+         frame-ancestors 'none'; \
+         base-uri 'self'; \
+         object-src 'none'; \
+         form-action 'self'"
+    )
+}
 
 pub async fn run_server() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
@@ -98,9 +107,12 @@ pub async fn run_server() -> anyhow::Result<()> {
         tracing::warn!(error = ?e, "queue resume failed");
     }
 
+    let csp = build_csp(cfg.shelf_url.as_deref());
+    let csp_value = axum::http::HeaderValue::from_str(&csp)
+        .map_err(|e| anyhow::anyhow!("invalid CSP header (bad shelf_url?): {e}"))?;
     let app = routes::router(state.clone()).layer(SetResponseHeaderLayer::if_not_present(
         axum::http::header::CONTENT_SECURITY_POLICY,
-        axum::http::HeaderValue::from_static(CSP),
+        csp_value,
     ));
 
     poller::spawn(state.clone());

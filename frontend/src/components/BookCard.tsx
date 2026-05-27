@@ -1,4 +1,5 @@
 import { useTheme } from "@emotion/react";
+import { useRef } from "react";
 
 import type { Book, Job } from "../api";
 import { coverUrl } from "../api";
@@ -19,6 +20,18 @@ type Props = {
    * Rendered as a small badge so users with multi-region accounts can
    * tell editions apart at a glance. Undefined hides the badge. */
   region?: string | null;
+  /** Whether the in-UI preview player is available for this book (shelf
+   * configured + the book is done). Shows a play/pause overlay on the
+   * cover. Preview only — no playback position is stored. */
+  canPlay?: boolean;
+  isPlaying?: boolean;
+  /** 0..1 playback progress of the active book; drives the arc around
+   * the play/pause button. Only meaningful while isPlaying. */
+  progress?: number;
+  onTogglePlay?: () => void;
+  /** Seek the active book to a 0..1 fraction. Wired to the ring as a
+   * mouse-only scrub (the ring expands on hover); touch never scrubs. */
+  onScrub?: (fraction: number) => void;
 };
 
 export default function BookCard({
@@ -29,10 +42,49 @@ export default function BookCard({
   onRemove,
   duplicateOf = [],
   region,
+  canPlay = false,
+  isPlaying = false,
+  progress = 0,
+  onTogglePlay,
+  onScrub,
 }: Props) {
   const theme = useTheme();
   const status = jobStatus(job);
   const isDuplicate = duplicateOf.length > 0;
+
+  // Mouse-only scrub: map a pointer position on the ring to a 0..1
+  // fraction by its angle from the ring centre (top = 0, clockwise).
+  // Radius doesn't matter, so the hover-expanded ring just gives a
+  // bigger, more precise target. Touch/pen are ignored.
+  const ringRef = useRef<SVGSVGElement | null>(null);
+  const scrubbingRef = useRef(false);
+  const fractionFromEvent = (e: React.PointerEvent<SVGSVGElement>) => {
+    const svg = ringRef.current;
+    if (!svg) return 0;
+    const r = svg.getBoundingClientRect();
+    const dx = e.clientX - (r.left + r.width / 2);
+    const dy = e.clientY - (r.top + r.height / 2);
+    const f = (Math.atan2(dy, dx) + Math.PI / 2) / (2 * Math.PI);
+    return ((f % 1) + 1) % 1;
+  };
+  const onRingDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType !== "mouse" || !onScrub) return;
+    scrubbingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    onScrub(fractionFromEvent(e));
+  };
+  const onRingMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!scrubbingRef.current) return;
+    onScrub?.(fractionFromEvent(e));
+  };
+  const onRingUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    scrubbingRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer already released — nothing to do
+    }
+  };
 
   return (
     <article
@@ -53,6 +105,19 @@ export default function BookCard({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          // Play button reveals on hover; pause (no .play-overlay class)
+          // stays put. Touch devices have no hover, so show it always
+          // there — otherwise the preview is unreachable on mobile.
+          "& .play-overlay": { opacity: 0 },
+          "&:hover .play-overlay": { opacity: 1 },
+          "@media (hover: none)": {
+            "& .play-overlay": { opacity: 1 },
+          },
+          // Hover expands the progress ring into a bigger scrub target
+          // (mouse only — touch never hovers, so it stays small there).
+          "&:hover .scrub-ring": {
+            transform: "translate(-50%, -50%) rotate(-90deg) scale(2.3)",
+          },
         }}
       >
         {book.cover_url ? (
@@ -88,6 +153,97 @@ export default function BookCard({
           >
             {region}
           </span>
+        )}
+        {canPlay && onTogglePlay && (
+          <>
+            {isPlaying && (
+              <svg
+                ref={ringRef}
+                className="scrub-ring"
+                width="56"
+                height="56"
+                viewBox="0 0 56 56"
+                onPointerDown={onRingDown}
+                onPointerMove={onRingMove}
+                onPointerUp={onRingUp}
+                css={{
+                  position: "absolute",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%) rotate(-90deg)",
+                  transition: "transform 150ms ease",
+                  // Mouse scrub captures pointer events on the ring band;
+                  // the centre play/pause button sits on top (later in the
+                  // DOM) so its clicks still toggle. Touch falls through to
+                  // the guard in onRingDown and does nothing.
+                  pointerEvents: onScrub ? "auto" : "none",
+                  cursor: onScrub ? "pointer" : "default",
+                }}
+              >
+                {/* Dark backing disc: scales with the ring (it's inside the
+                    scaled svg) so the white arc keeps contrast on a light
+                    cover, and doubles as the full-area pointer target — a
+                    click anywhere maps to its angle, not just the 3px
+                    stroke. The centre button sits on top for its clicks. */}
+                <circle cx="28" cy="28" r="26" fill="rgba(0, 0, 0, 0.5)" />
+                <circle
+                  cx="28"
+                  cy="28"
+                  r="25"
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.3)"
+                  strokeWidth="3"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <circle
+                  cx="28"
+                  cy="28"
+                  r="25"
+                  fill="none"
+                  stroke="#fff"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                  strokeDasharray={RING_CIRCUMFERENCE}
+                  strokeDashoffset={
+                    RING_CIRCUMFERENCE *
+                    // Tiny 1% floor: the round linecap renders it as a
+                    // small nub at the top so the ring reads as "started"
+                    // without overstating progress on a multi-hour book.
+                    (1 - Math.min(1, Math.max(0.01, progress)))
+                  }
+                  css={{ transition: "stroke-dashoffset 250ms linear" }}
+                />
+              </svg>
+            )}
+            <button
+              onClick={onTogglePlay}
+              className={isPlaying ? undefined : "play-overlay"}
+              title={isPlaying ? "pause preview" : "play preview"}
+              aria-label={isPlaying ? "pause preview" : "play preview"}
+              css={{ ...playOverlay, ...(isPlaying ? { opacity: 1 } : {}) }}
+            >
+              {isPlaying ? (
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
+                </svg>
+              ) : (
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </button>
+          </>
         )}
       </div>
       <div
@@ -216,6 +372,29 @@ function cardActionButton(theme: ReturnType<typeof useTheme>) {
     },
   } as const;
 }
+
+// Circumference of the r=25 progress ring (2πr), for stroke-dash maths.
+const RING_CIRCUMFERENCE = 2 * Math.PI * 25;
+
+const playOverlay = {
+  position: "absolute",
+  top: "50%",
+  left: "50%",
+  transform: "translate(-50%, -50%)",
+  width: 48,
+  height: 48,
+  borderRadius: "50%",
+  border: "none",
+  padding: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(0, 0, 0, 0.55)",
+  color: "#fff",
+  cursor: "pointer",
+  transition: "opacity 120ms ease, background 120ms ease",
+  "&:hover": { background: "rgba(0, 0, 0, 0.78)" },
+} as const;
 
 function removeButton(theme: ReturnType<typeof useTheme>) {
   return {

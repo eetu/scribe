@@ -54,6 +54,9 @@ export type Book = {
   /** Marketplace locale of the owning account ("us", "uk", …). null
    * when scribe predates the join — UI renders no badge in that case. */
   region: string | null;
+  /** Audible's total runtime in ms; the preview player's seek
+   * denominator (a streamed <audio>.duration can be Infinity). */
+  runtime_length_ms: number | null;
 };
 
 export type Job = {
@@ -118,6 +121,20 @@ export class ApiError extends Error {
  * mirrored from Amazon), so art survives Amazon pulling a title. */
 export const coverUrl = (asin: string) =>
   `/api/books/${encodeURIComponent(asin)}/cover`;
+
+/** Cross-origin shelf stream for the in-UI preview player. shelf's
+ * /file/{ino} ignores the ino, resolving the m4b from {account}:{asin}
+ * alone, so a literal 0 works. Token rides as a query param (no header
+ * injection on a media element); it's the same key shown in settings. */
+export const audioUrl = (
+  shelfUrl: string,
+  token: string,
+  accountId: string,
+  asin: string,
+) =>
+  `${shelfUrl.replace(/\/+$/, "")}/api/items/${encodeURIComponent(
+    `${accountId}:${asin}`,
+  )}/file/0?token=${encodeURIComponent(token)}`;
 
 export const api = {
   status: () => req<Status>("/status"),

@@ -358,7 +358,7 @@ async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppRe
         .with(move |c| {
             let mut stmt = c.prepare(
                 "SELECT b.asin, b.account_id, b.title, b.authors_json, b.cover_url,
-                        b.status, b.purchase_date, a.locale
+                        b.status, b.purchase_date, a.locale, b.runtime_length_ms
                  FROM books b
                  JOIN accounts a ON a.id = b.account_id
                  WHERE a.profile_id = ?1
@@ -379,6 +379,10 @@ async fn list_library(user: AuthProfile, State(state): State<AppState>) -> AppRe
                         // separate accounts lookup. Same join we already
                         // need for profile-scoping; near-zero cost.
                         "region": r.get::<_, Option<String>>(7)?,
+                        // Authoritative total from Audible — the preview
+                        // player uses it as a finite seek denominator
+                        // since a streamed <audio>.duration can be Infinity.
+                        "runtime_length_ms": r.get::<_, Option<i64>>(8)?,
                     }))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

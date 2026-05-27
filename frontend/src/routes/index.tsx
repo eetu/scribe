@@ -1,9 +1,9 @@
 import { useTheme } from "@emotion/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 
-import { api, type Book, type Job } from "../api";
+import { api, audioUrl, type Book, type Job } from "../api";
 import BookCard from "../components/BookCard";
 
 const ACTIVE_JOB_PHASES = new Set([
@@ -54,6 +54,7 @@ export const Route = createFileRoute("/")({ component: LibraryPage });
 const fetcher = () => api.library();
 const accountsFetcher = () => api.accounts();
 const jobsFetcher = () => api.jobs();
+const meFetcher = () => api.me();
 
 // eslint-disable-next-line react-refresh/only-export-components
 function LibraryPage() {
@@ -63,9 +64,84 @@ function LibraryPage() {
   const { data: jobs } = useSWR("/api/jobs", jobsFetcher, {
     refreshInterval: 5000,
   });
+  const { data: me } = useSWR("/api/me", meFetcher);
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("title");
+
+  // Single shared <audio> for the preview player so only one book ever
+  // plays at a time. Sourced from the shelf sidecar; the feature hides
+  // entirely when shelf isn't configured. Per-book positions live in a
+  // ref (ephemeral — a page refresh forgets them and replays from 0),
+  // so pause/resume and switching between books keep their place within
+  // the session without persisting anything to the library.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const positionsRef = useRef<Map<string, number>>(new Map());
+  const loadedAsinRef = useRef<string | null>(null);
+  const [playingAsin, setPlayingAsin] = useState<string | null>(null);
+  // 0..1 fraction through the playing book, for the cover progress arc.
+  // Rounded to 0.5% steps so the ~4Hz timeupdate doesn't re-render the
+  // grid on every tick (React skips when the value is unchanged).
+  const [progress, setProgress] = useState(0);
+  const shelfReady = Boolean(me?.shelf_url && me?.shelf_api_key);
+
+  const stashPosition = (a: HTMLAudioElement) => {
+    if (loadedAsinRef.current) {
+      positionsRef.current.set(loadedAsinRef.current, a.currentTime);
+    }
+  };
+
+  const togglePlay = (book: Book) => {
+    const a = audioRef.current;
+    if (!a || !me?.shelf_url || !me?.shelf_api_key) return;
+    // Pause the active book — keep its spot for an in-place resume.
+    if (playingAsin === book.asin) {
+      stashPosition(a);
+      a.pause();
+      setPlayingAsin(null);
+      return;
+    }
+    // Switch streams: save the loaded book's spot, point the element at
+    // the new one, and seek to its remembered offset once metadata is in
+    // (currentTime can't be set before then).
+    if (loadedAsinRef.current !== book.asin) {
+      stashPosition(a);
+      a.src = audioUrl(
+        me.shelf_url,
+        me.shelf_api_key,
+        book.account_id,
+        book.asin,
+      );
+      loadedAsinRef.current = book.asin;
+      setProgress(0);
+      const target = positionsRef.current.get(book.asin) ?? 0;
+      if (target > 0) {
+        const seek = () => {
+          a.currentTime = target;
+          a.removeEventListener("loadedmetadata", seek);
+        };
+        a.addEventListener("loadedmetadata", seek);
+      }
+    }
+    void a.play();
+    setPlayingAsin(book.asin);
+  };
+
+  // Mouse-only scrub from the cover ring. Seeks the currently-loaded
+  // stream to `fraction` of the book; uses Audible's runtime as the
+  // denominator since a streamed <audio>.duration can be Infinity.
+  const scrubTo = (book: Book, fraction: number) => {
+    const a = audioRef.current;
+    if (!a || loadedAsinRef.current !== book.asin) return;
+    const totalSec =
+      Number.isFinite(a.duration) && a.duration > 0
+        ? a.duration
+        : (book.runtime_length_ms ?? 0) / 1000;
+    if (totalSec <= 0) return;
+    const f = Math.min(1, Math.max(0, fraction));
+    a.currentTime = f * totalSec;
+    setProgress(f);
+  };
 
   const items: Book[] = useMemo(() => data?.items ?? [], [data]);
 
@@ -155,6 +231,25 @@ function LibraryPage() {
 
   return (
     <>
+      <audio
+        ref={audioRef}
+        onTimeUpdate={(e) => {
+          const a = e.currentTarget;
+          if (a.duration > 0) {
+            setProgress(
+              Math.min(1, Math.round((a.currentTime / a.duration) * 200) / 200),
+            );
+          }
+        }}
+        onEnded={() => {
+          if (loadedAsinRef.current) {
+            positionsRef.current.delete(loadedAsinRef.current);
+          }
+          setProgress(0);
+          setPlayingAsin(null);
+        }}
+        hidden
+      />
       {showBacklogHint && (
         <div
           css={{
@@ -312,6 +407,11 @@ function LibraryPage() {
             job={jobByAsin.get(b.asin) ?? null}
             duplicateOf={dupesByAsin.get(b.asin)}
             region={b.region}
+            canPlay={shelfReady && buckets.get(b.asin) === "done"}
+            isPlaying={playingAsin === b.asin}
+            progress={playingAsin === b.asin ? progress : 0}
+            onTogglePlay={() => togglePlay(b)}
+            onScrub={(f) => scrubTo(b, f)}
             onDownload={async () => {
               await api.enqueueJob({ account_id: b.account_id, asin: b.asin });
               mutate("/api/jobs");
