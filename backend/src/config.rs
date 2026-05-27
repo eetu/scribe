@@ -18,6 +18,10 @@ pub struct Config {
     pub shelf_api_key: Option<String>,
     pub library_dir: PathBuf,
     pub original_dir: PathBuf,
+    /// Where cached cover images live, keyed by asin. Restic-backed
+    /// (sits under /var/lib/scribe → /data in-container). Covers survive
+    /// Amazon pulling a title's CDN art and a books-table wipe alike.
+    pub covers_dir: PathBuf,
     /// LAN URL of this scribe instance, as seen from the press worker.
     /// Used to mint short-lived `/internal/aaxc/<token>` URLs that point
     /// press at locally-stored AAXC files during a reconvert. Unset =
@@ -80,6 +84,9 @@ impl Config {
                 .into(),
             original_dir: env::var("SCRIBE_ORIGINAL_DIR")
                 .unwrap_or_else(|_| "/mnt/audiobooks/original".into())
+                .into(),
+            covers_dir: env::var("SCRIBE_COVERS_DIR")
+                .unwrap_or_else(|_| "/data/covers".into())
                 .into(),
             internal_url: env::var("SCRIBE_INTERNAL_URL")
                 .ok()

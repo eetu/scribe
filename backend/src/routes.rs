@@ -10,6 +10,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
+use rusqlite::OptionalExtension;
+
 use crate::auth::AuthProfile;
 use crate::error::{AppError, AppResult};
 use crate::press::PressClient;
@@ -47,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/library/sync", post(sync_library))
         .route("/api/library/reconcile", post(reconcile_route))
         .route("/api/books/{asin}", delete(remove_book))
+        .route("/api/books/{asin}/cover", get(book_cover))
         .route("/api/jobs", get(list_jobs).post(enqueue_job))
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
@@ -648,6 +651,73 @@ async fn remove_book(
         "books_deleted": books_deleted,
         "jobs_deleted": jobs_deleted,
     })))
+}
+
+/// Serve a book's cover from the local disk cache, lazily mirroring it
+/// from the Amazon CDN on first request. Public (cover bytes aren't
+/// sensitive) so plain `<img src>` works without a cookie, and so the
+/// art survives Amazon later pulling the title. ETag/Cache-Control let
+/// the browser skip re-fetching.
+async fn book_cover(
+    State(state): State<AppState>,
+    Path(asin): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Result<axum::response::Response, AppError> {
+    use axum::http::header;
+
+    let (path, mime) = match crate::covers::find_cached(&state.cfg.covers_dir, &asin).await {
+        Some(pm) => pm,
+        None => {
+            let asin_q = asin.clone();
+            let url: Option<String> = state
+                .db
+                .with(move |c| {
+                    c.query_row(
+                        "SELECT cover_url FROM books
+                         WHERE asin = ?1 AND cover_url IS NOT NULL LIMIT 1",
+                        rusqlite::params![asin_q],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()
+                })
+                .await?;
+            let url = url.ok_or(AppError::NotFound)?;
+            crate::covers::fetch_and_store(&state, &asin, &url)
+                .await
+                .map_err(|_| AppError::NotFound)?
+        }
+    };
+
+    let meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let etag = meta
+        .modified()
+        .ok()
+        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| format!("\"{}-{}\"", asin, d.as_secs()))
+        .unwrap_or_else(|| format!("\"{asin}\""));
+
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        == Some(etag.as_str())
+    {
+        return Ok(axum::response::Response::builder()
+            .status(axum::http::StatusCode::NOT_MODIFIED)
+            .body(axum::body::Body::empty())
+            .unwrap());
+    }
+
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, mime)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .header(header::ETAG, etag)
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))
 }
 
 async fn assert_owns_account(state: &AppState, profile_id: i64, account_id: &str) -> AppResult<()> {

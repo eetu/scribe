@@ -14,6 +14,10 @@ pub struct Config {
     pub api_key: String,
     /// Display name surfaced via /api/libraries.
     pub library_name: String,
+    /// scribe's on-disk cover cache (`{asin}.{ext}`), mounted read-only.
+    /// Covers are served from here so a title Audible has pulled still
+    /// shows art; falls back to a live CDN proxy on a cache miss.
+    pub covers_dir: PathBuf,
 }
 
 impl Config {
@@ -32,12 +36,16 @@ impl Config {
         }
         let library_name =
             env::var("SHELF_LIBRARY_NAME").unwrap_or_else(|_| "Audiobooks".into());
+        let covers_dir = env::var("SHELF_COVERS_DIR")
+            .unwrap_or_else(|_| "/data/covers".into())
+            .into();
         Ok(Self {
             bind,
             db_path,
             library_dir,
             api_key,
             library_name,
+            covers_dir,
         })
     }
 }

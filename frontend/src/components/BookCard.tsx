@@ -1,6 +1,7 @@
 import { useTheme } from "@emotion/react";
 
 import type { Book, Job } from "../api";
+import { coverUrl } from "../api";
 
 type Props = {
   book: Book;
@@ -56,7 +57,7 @@ export default function BookCard({
       >
         {book.cover_url ? (
           <img
-            src={book.cover_url}
+            src={coverUrl(book.asin)}
             alt=""
             css={{ width: "100%", height: "100%", objectFit: "cover" }}
             loading="lazy"

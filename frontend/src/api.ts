@@ -114,6 +114,11 @@ export class ApiError extends Error {
   }
 }
 
+/** Same-origin cover endpoint — serves the disk-cached copy (lazily
+ * mirrored from Amazon), so art survives Amazon pulling a title. */
+export const coverUrl = (asin: string) =>
+  `/api/books/${encodeURIComponent(asin)}/cover`;
+
 export const api = {
   status: () => req<Status>("/status"),
   me: () => req<Me>("/api/me"),

@@ -329,6 +329,30 @@ async fn item_cover(
     Path(id): Path<String>,
 ) -> ShelfResult<Response> {
     let (asin, account_id) = parse_item_id(&id)?;
+
+    // Prefer the on-disk cache scribe maintains ({asin}.{ext}); it keeps
+    // working after Amazon pulls a title. Only proxy the CDN on a miss.
+    if asin.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        for (ext, mime) in [
+            ("jpg", "image/jpeg"),
+            ("png", "image/png"),
+            ("webp", "image/webp"),
+            ("gif", "image/gif"),
+        ] {
+            let p = state.cfg.covers_dir.join(format!("{asin}.{ext}"));
+            if let Ok(bytes) = tokio::fs::read(&p).await {
+                return Ok((
+                    [
+                        (header::CONTENT_TYPE, mime.to_string()),
+                        (header::CACHE_CONTROL, "public, max-age=86400".to_string()),
+                    ],
+                    bytes,
+                )
+                    .into_response());
+            }
+        }
+    }
+
     let asin_q = asin.clone();
     let acc_q = account_id.clone();
     let cover_url: Option<String> = state
