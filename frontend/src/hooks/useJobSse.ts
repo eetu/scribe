@@ -20,10 +20,16 @@ export type JobLive = {
  */
 export function useJobSse(jobId: string | null): JobLive {
   const [live, setLive] = useState<JobLive>({ status: null, progress: null });
+  const [prevJobId, setPrevJobId] = useState(jobId);
+
+  // Reset stale state when jobId changes via the "compare in render"
+  if (jobId !== prevJobId) {
+    setPrevJobId(jobId);
+    setLive({ status: null, progress: null });
+  }
 
   useEffect(() => {
     if (!jobId) return;
-    setLive({ status: null, progress: null });
     const es = new EventSource(`/api/jobs/${jobId}/sse`);
     es.onmessage = (e) => {
       try {
