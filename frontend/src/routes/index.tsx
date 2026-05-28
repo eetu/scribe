@@ -389,15 +389,22 @@ function LibraryPage() {
               ["unavailable", "unavailable"],
               ["new", "new"],
             ] as [FilterKey, string][]
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setFilter(key)}
-              css={filterChip(theme, filter === key)}
-            >
-              {label} {counts[key]}
-            </button>
-          ))}
+          )
+            // Hide empty buckets so the row stays compact; keep "all"
+            // always, and keep the active filter visible even at zero so
+            // a user-driven empty bucket isn't yanked from under them.
+            .filter(
+              ([key]) => key === "all" || counts[key] > 0 || filter === key,
+            )
+            .map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setFilter(key)}
+                css={filterChip(theme, filter === key)}
+              >
+                {label} {counts[key]}
+              </button>
+            ))}
         </div>
         <select
           value={sort}
