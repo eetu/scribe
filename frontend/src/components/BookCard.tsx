@@ -67,10 +67,10 @@ export default function BookCard({
     : coverUrl(book.asin);
   const isDuplicate = duplicateOf.length > 0;
 
-  // Mouse-only scrub: map a pointer position on the ring to a 0..1
-  // fraction by its angle from the ring centre (top = 0, clockwise).
-  // Radius doesn't matter, so the hover-expanded ring just gives a
-  // bigger, more precise target. Touch/pen are ignored.
+  // Scrub: map a pointer position on the ring to a 0..1 fraction by its
+  // angle from the ring centre (top = 0, clockwise). Radius doesn't
+  // matter — the hover- (desktop) or always- (touch) expanded ring just
+  // gives a bigger, more precise target. Works for mouse + touch + pen.
   const ringRef = useRef<SVGSVGElement | null>(null);
   const scrubbingRef = useRef(false);
   const fractionFromEvent = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -83,7 +83,7 @@ export default function BookCard({
     return ((f % 1) + 1) % 1;
   };
   const onRingDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (e.pointerType !== "mouse" || !onScrub) return;
+    if (!onScrub) return;
     scrubbingRef.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
     onScrub(fractionFromEvent(e));
@@ -125,13 +125,18 @@ export default function BookCard({
           // there — otherwise the preview is unreachable on mobile.
           "& .play-overlay": { opacity: 0 },
           "&:hover .play-overlay": { opacity: 1 },
-          "@media (hover: none)": {
-            "& .play-overlay": { opacity: 1 },
-          },
-          // Hover expands the progress ring into a bigger scrub target
-          // (mouse only — touch never hovers, so it stays small there).
+          // Hover expands the ring into a bigger scrub target on desktop.
           "&:hover .scrub-ring": {
             transform: "translate(-50%, -50%) rotate(-90deg) scale(2.3)",
+          },
+          // Touch has no hover, so always show the play button and keep
+          // the ring at its expanded size — phones get the same scrub
+          // area without needing to hover-then-tap.
+          "@media (hover: none)": {
+            "& .play-overlay": { opacity: 1 },
+            "& .scrub-ring": {
+              transform: "translate(-50%, -50%) rotate(-90deg) scale(2.3)",
+            },
           },
         }}
       >
@@ -233,6 +238,26 @@ export default function BookCard({
                     click anywhere maps to its angle, not just the 3px
                     stroke. The centre button sits on top for its clicks. */}
                 <circle cx="28" cy="28" r="26" fill="rgba(0, 0, 0, 0.5)" />
+                {/* Lighter progress wedge filling the disc between the
+                    play button and the outer ring. A circle at r=12.5
+                    with stroke 25 spans 0..25 in svg units (full inner
+                    disc); the dasharray sweep reveals it clockwise from
+                    top. Stroke scales with the svg so the wedge grows
+                    proportionally when the ring expands on hover/touch. */}
+                <circle
+                  cx="28"
+                  cy="28"
+                  r="12.5"
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.16)"
+                  strokeWidth="25"
+                  strokeDasharray={WEDGE_CIRCUMFERENCE}
+                  strokeDashoffset={
+                    WEDGE_CIRCUMFERENCE *
+                    (1 - Math.min(1, Math.max(0, progress)))
+                  }
+                  css={{ transition: "stroke-dashoffset 250ms linear" }}
+                />
                 <circle
                   cx="28"
                   cy="28"
@@ -444,6 +469,11 @@ function cardActionButton(theme: ReturnType<typeof useTheme>) {
 
 // Circumference of the r=25 progress ring (2πr), for stroke-dash maths.
 const RING_CIRCUMFERENCE = 2 * Math.PI * 25;
+// Inner "wedge" — a circle whose stroke is wide enough to fill the disc
+// from the play-button edge out to the ring. Drawn with a progress-driven
+// dash so it sweeps clockwise from the top, a lighter shade behind the
+// crisp outer arc.
+const WEDGE_CIRCUMFERENCE = 2 * Math.PI * 12.5;
 
 const playOverlay = {
   position: "absolute",
