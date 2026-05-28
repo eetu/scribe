@@ -109,17 +109,6 @@ function SettingsPage() {
           })}
         </div>
       </Card>
-
-      <p
-        css={{
-          marginTop: 18,
-          fontSize: 12,
-          color: theme.colors.text.muted,
-          lineHeight: 1.6,
-        }}
-      >
-        everything not listed here is in env vars. see backend/CLAUDE.md.
-      </p>
     </>
   );
 }

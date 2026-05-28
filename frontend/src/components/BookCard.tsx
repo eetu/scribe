@@ -343,9 +343,22 @@ export default function BookCard({
             marginTop: "auto",
             paddingTop: 4,
             minHeight: 28,
+            gap: 8,
+            flexWrap: "nowrap",
           }}
         >
-          <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div
+            css={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              // Let the left group shrink so the chip's ellipsis kicks in
+              // before the right-side action buttons get clipped.
+              minWidth: 0,
+              flex: "1 1 auto",
+              overflow: "hidden",
+            }}
+          >
             <StatusChip
               label={status.label}
               tone={status.tone}
@@ -513,6 +526,12 @@ function StatusChip({
         color,
         textTransform: "lowercase",
         cursor: title ? "help" : undefined,
+        // Truncate long phases ("fetching voucher", "unavailable") so a
+        // chip + remove + re-convert stack never pushes past the card.
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        minWidth: 0,
       }}
     >
       {label}
