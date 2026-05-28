@@ -441,6 +441,7 @@ function LibraryPage() {
             duplicateOf={dupesByAsin.get(b.asin)}
             dupeBetterKbps={betterDupeKbps.get(b.asin)}
             region={b.region}
+            showStatusBand={filter === "all"}
             canPlay={shelfReady && buckets.get(b.asin) === "done"}
             isPlaying={playingAsin === b.asin}
             progress={playingAsin === b.asin ? progress : 0}

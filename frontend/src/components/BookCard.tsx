@@ -41,6 +41,9 @@ type Props = {
   /** Cache-buster appended to the cover URL so a just-refreshed cover
    * reloads past the browser's long-lived image cache. */
   coverBust?: number;
+  /** Show the tone-tinted status band below the cover. Off when the user
+   * is filtering by a single status (band is then noise). Default on. */
+  showStatusBand?: boolean;
 };
 
 export default function BookCard({
@@ -59,6 +62,7 @@ export default function BookCard({
   onScrub,
   onRefresh,
   coverBust,
+  showStatusBand = true,
 }: Props) {
   const theme = useTheme();
   const status = jobStatus(job);
@@ -66,12 +70,19 @@ export default function BookCard({
     ? `${coverUrl(book.asin)}?v=${coverBust}`
     : coverUrl(book.asin);
   const isDuplicate = duplicateOf.length > 0;
-  // Status band: a tinted full-width strip below the cover for noteworthy
-  // states (in-progress / failed / missing / unavailable). Hidden for the
-  // ho-hum "done" + "new"/"cancelled" cases so cards stay quiet.
-  const showStatusBand = status.tone === "active" || status.tone === "err";
+  // Status band: a tinted full-width strip below the cover; tone drives
+  // the color so the card's state reads at a glance regardless of where
+  // the user is looking.
   const statusBandColor =
-    status.tone === "err" ? theme.colors.error : theme.colors.activity.on;
+    status.tone === "err"
+      ? theme.colors.error
+      : status.tone === "active"
+        ? theme.colors.activity.on
+        : status.tone === "ok"
+          ? theme.colors.connected
+          : // muted = "new"/"cancelled" — light blue reads as informational
+            // rather than dormant gray, signalling "not yet acted on".
+            theme.colors.rain;
 
   // Scrub: map a pointer position on the ring to a 0..1 fraction by its
   // angle from the ring centre (top = 0, clockwise). Radius doesn't
@@ -118,6 +129,24 @@ export default function BookCard({
         flexDirection: "column",
       }}
     >
+      {showStatusBand && (
+        <div
+          title={status.tooltip}
+          css={{
+            background: `color-mix(in srgb, ${statusBandColor} 20%, transparent)`,
+            color: statusBandColor,
+            textAlign: "center",
+            fontFamily: theme.fonts.heading,
+            fontSize: 11,
+            textTransform: "lowercase",
+            letterSpacing: "0.02em",
+            padding: "3px 8px",
+            cursor: status.tooltip ? "help" : undefined,
+          }}
+        >
+          {status.label}
+        </div>
+      )}
       <div
         css={{
           position: "relative",
@@ -324,24 +353,6 @@ export default function BookCard({
           </>
         )}
       </div>
-      {showStatusBand && (
-        <div
-          title={status.tooltip}
-          css={{
-            background: `color-mix(in srgb, ${statusBandColor} 20%, transparent)`,
-            color: statusBandColor,
-            textAlign: "center",
-            fontFamily: theme.fonts.heading,
-            fontSize: 11,
-            textTransform: "lowercase",
-            letterSpacing: "0.02em",
-            padding: "3px 8px",
-            cursor: status.tooltip ? "help" : undefined,
-          }}
-        >
-          {status.label}
-        </div>
-      )}
       <div
         css={{
           padding: 12,
