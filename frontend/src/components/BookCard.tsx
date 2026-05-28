@@ -66,6 +66,12 @@ export default function BookCard({
     ? `${coverUrl(book.asin)}?v=${coverBust}`
     : coverUrl(book.asin);
   const isDuplicate = duplicateOf.length > 0;
+  // Status band: a tinted full-width strip below the cover for noteworthy
+  // states (in-progress / failed / missing / unavailable). Hidden for the
+  // ho-hum "done" + "new"/"cancelled" cases so cards stay quiet.
+  const showStatusBand = status.tone === "active" || status.tone === "err";
+  const statusBandColor =
+    status.tone === "err" ? theme.colors.error : theme.colors.activity.on;
 
   // Scrub: map a pointer position on the ring to a 0..1 fraction by its
   // angle from the ring centre (top = 0, clockwise). Radius doesn't
@@ -318,6 +324,24 @@ export default function BookCard({
           </>
         )}
       </div>
+      {showStatusBand && (
+        <div
+          title={status.tooltip}
+          css={{
+            background: `color-mix(in srgb, ${statusBandColor} 20%, transparent)`,
+            color: statusBandColor,
+            textAlign: "center",
+            fontFamily: theme.fonts.heading,
+            fontSize: 11,
+            textTransform: "lowercase",
+            letterSpacing: "0.02em",
+            padding: "3px 8px",
+            cursor: status.tooltip ? "help" : undefined,
+          }}
+        >
+          {status.label}
+        </div>
+      )}
       <div
         css={{
           padding: 12,
@@ -372,23 +396,7 @@ export default function BookCard({
             flexWrap: "nowrap",
           }}
         >
-          <div
-            css={{
-              display: "flex",
-              gap: 6,
-              alignItems: "center",
-              // Let the left group shrink so the chip's ellipsis kicks in
-              // before the right-side action buttons get clipped.
-              minWidth: 0,
-              flex: "1 1 auto",
-              overflow: "hidden",
-            }}
-          >
-            <StatusChip
-              label={status.label}
-              tone={status.tone}
-              title={status.tooltip}
-            />
+          <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
             {isDuplicate && (
               <span
                 title={`Another copy in your library: ${duplicateOf.join(", ")}. Likely same recording across regions, but Audible doesn't guarantee — content may differ.`}
@@ -527,46 +535,6 @@ function mutedButton(theme: ReturnType<typeof useTheme>) {
       color: theme.colors.activity.on,
     },
   } as const;
-}
-
-function StatusChip({
-  label,
-  tone,
-  title,
-}: {
-  label: string;
-  tone: "muted" | "active" | "ok" | "err";
-  title?: string;
-}) {
-  const theme = useTheme();
-  const color =
-    tone === "ok"
-      ? theme.colors.connected
-      : tone === "err"
-        ? theme.colors.error
-        : tone === "active"
-          ? theme.colors.activity.on
-          : theme.colors.text.muted;
-  return (
-    <span
-      title={title}
-      css={{
-        fontFamily: theme.fonts.heading,
-        fontSize: 11,
-        color,
-        textTransform: "lowercase",
-        cursor: title ? "help" : undefined,
-        // Truncate long phases ("fetching voucher", "unavailable") so a
-        // chip + remove + re-convert stack never pushes past the card.
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        minWidth: 0,
-      }}
-    >
-      {label}
-    </span>
-  );
 }
 
 function jobStatus(job: Job | null): {
