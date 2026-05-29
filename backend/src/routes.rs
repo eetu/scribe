@@ -67,10 +67,16 @@ pub fn router(state: AppState) -> Router {
 async fn status(State(state): State<AppState>) -> Json<Value> {
     let shim = ShimClient::new(&state);
     let press = PressClient::new(&state);
-    let (shim_healthy, press_health, shelf_healthy) = tokio::join!(
+    // `oidc_ready` doubles as the self-heal driver: ctx() re-attempts
+    // discovery when the issuer was down at boot, so the regular /status
+    // poll recovers auth without a restart. Reported honestly so the failure
+    // is visible (status itself stays 200 — a 503 here would just make the
+    // orchestrator kill a container that can heal itself).
+    let (shim_healthy, press_health, shelf_healthy, oidc_ready) = tokio::join!(
         shim.health(),
         async { press.health().await.unwrap_or(false) },
         async { shelf_health(&state).await },
+        async { state.oidc.ctx().await.is_some() },
     );
     Json(json!({
         "service": "scribe",
@@ -82,6 +88,8 @@ async fn status(State(state): State<AppState>) -> Json<Value> {
         "shelf_url": state.cfg.shelf_url,
         "shelf_healthy": shelf_healthy,
         "dev_auth": state.cfg.dev_auth,
+        "oidc_configured": state.oidc.is_configured(),
+        "oidc_ready": oidc_ready,
         "auto_enqueue_default": state.cfg.auto_enqueue_new,
         "library_dir": state.cfg.library_dir,
         "original_dir": state.cfg.original_dir,

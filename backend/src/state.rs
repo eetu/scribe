@@ -47,10 +47,10 @@ pub struct AppState {
     /// an already-built AppState (it spawns workers that capture it), so we
     /// can't put the Queue inside the struct it depends on without a cycle.
     pub queue: Arc<OnceLock<crate::queue::Queue>>,
-    /// Discovered OIDC provider — `None` when env vars aren't set or
-    /// discovery failed at boot. `/auth/login` falls back to DEV_AUTH in
-    /// that case (or 503 if DEV_AUTH is off too).
-    pub oidc: Option<Arc<crate::oidc::OidcContext>>,
+    /// Lazily-discovered OIDC provider with on-demand retry. Discovery runs
+    /// on first auth use and on the `/status` poll, so a kanidm that was
+    /// down at boot self-heals without a restart. See [`crate::oidc::OidcLazy`].
+    pub oidc: Arc<crate::oidc::OidcLazy>,
     /// Tokens for serving local AAXC files to press during reconverts.
     pub aaxc_tokens: AaxcTokenStore,
 }

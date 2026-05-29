@@ -78,23 +78,11 @@ pub async fn run_server() -> anyhow::Result<()> {
         .timeout(std::time::Duration::from_secs(60))
         .build()?;
 
-    // Discover OIDC at boot if env vars present. A failure here logs and
-    // falls back to DEV_AUTH path — production deploys with DEV_AUTH off
-    // and discovery failing means /auth/login returns 503 until kanidm is
-    // reachable + the client secret is wired.
-    let oidc = match &cfg.oidc {
-        Some(s) => match oidc::OidcContext::discover(s).await {
-            Ok(c) => {
-                tracing::info!(issuer = %s.issuer, "oidc provider discovered");
-                Some(Arc::new(c))
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "oidc discovery failed; falling back to DEV_AUTH or 503");
-                None
-            }
-        },
-        None => None,
-    };
+    // OIDC discovery is lazy (not at boot): kanidm may boot concurrently
+    // with us, and a failed one-shot boot discovery would wedge auth until a
+    // manual restart. Instead the first auth call and the `/status` poll
+    // drive discovery + retry, so it self-heals once kanidm is up.
+    let oidc = Arc::new(oidc::OidcLazy::new(cfg.oidc.clone()));
 
     let state = AppState {
         cfg: Arc::new(cfg.clone()),

@@ -121,6 +121,18 @@ admin/user split, no closed-registration env. Cookie payload is
 long as `SESSION_KEY` stays put; the v1 schema doesn't persist
 sessions anywhere else.
 
+OIDC discovery is **lazy + retried**, not done at boot. kanidm may boot
+concurrently with scribe; a one-shot boot discovery that failed would
+leave auth wedged until a manual restart (and `/status` would still
+return 200). Instead the first `/auth/login` and every `/status` poll
+route through `OidcLazy::ctx`, which discovers + caches on demand and
+re-attempts while the issuer is down — so it self-heals once kanidm is
+up, no restart needed. `/status` reports `oidc_configured` + `oidc_ready`
+(it stays 200 either way; a 503 there would just make the orchestrator
+kill a container that can recover on its own). While configured but not
+yet reachable, `/auth/login` returns a retryable 503 in prod rather than
+silently downgrading to DEV_AUTH.
+
 Profile model holds one row per OIDC sub. Audible accounts hang off
 `accounts.profile_id` — same profile can own multiple regions of the
 same Audible identity, and per-account isolation in queries always
