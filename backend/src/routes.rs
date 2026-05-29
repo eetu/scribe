@@ -742,34 +742,46 @@ async fn refresh_library(
 }
 
 /// Serve a book's cover from the local disk cache, lazily mirroring it
-/// from the Amazon CDN on first request. Public (cover bytes aren't
-/// sensitive) so plain `<img src>` works without a cookie, and so the
-/// art survives Amazon later pulling the title. ETag/Cache-Control let
-/// the browser skip re-fetching.
+/// from the Amazon CDN on first request. Requires a session and is scoped
+/// to a book the caller's profile owns — a plain `<img src>` works because
+/// same-origin requests carry the session cookie. ETag/Cache-Control let
+/// the browser skip re-fetching; the cached bytes survive Amazon later
+/// pulling the title.
 async fn book_cover(
+    user: AuthProfile,
     State(state): State<AppState>,
     Path(asin): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> Result<axum::response::Response, AppError> {
     use axum::http::header;
 
+    // Ownership gate first. The on-disk cache is keyed by asin alone, so
+    // checking ownership *before* find_cached stops an authenticated user
+    // from pulling another user's cached cover by guessing an asin (and
+    // stops anonymous access entirely). 404 when the caller owns no such
+    // book; the inner Option is the (nullable) cover_url.
+    let pid = user.id();
+    let asin_q = asin.clone();
+    let cover_url: Option<String> = state
+        .db
+        .with(move |c| {
+            c.query_row(
+                "SELECT cover_url FROM books
+                 WHERE asin = ?1
+                   AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)
+                 LIMIT 1",
+                rusqlite::params![asin_q, pid],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+        })
+        .await?
+        .ok_or(AppError::NotFound)?;
+
     let (path, mime) = match crate::covers::find_cached(&state.cfg.covers_dir, &asin).await {
         Some(pm) => pm,
         None => {
-            let asin_q = asin.clone();
-            let url: Option<String> = state
-                .db
-                .with(move |c| {
-                    c.query_row(
-                        "SELECT cover_url FROM books
-                         WHERE asin = ?1 AND cover_url IS NOT NULL LIMIT 1",
-                        rusqlite::params![asin_q],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()
-                })
-                .await?;
-            let url = url.ok_or(AppError::NotFound)?;
+            let url = cover_url.ok_or(AppError::NotFound)?;
             crate::covers::fetch_and_store(&state, &asin, &url)
                 .await
                 .map_err(|_| AppError::NotFound)?
