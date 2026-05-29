@@ -30,24 +30,13 @@ use crate::state::AppState;
 const COOKIE_NAME: &str = "scribe_session";
 const OIDC_COOKIE: &str = "scribe_oidc";
 
-/// Bytes extracted from the SESSION_KEY env. 64-byte minimum for signing.
+/// Build the signing key from the SESSION_KEY hex. `config::resolve_session_key`
+/// has already validated this is ≥64 bytes of real hex (or a random key in
+/// dev), so decoding here is infallible — no silent zero-pad fallback that
+/// would weaken a misconfigured key.
 pub fn cookie_key(hex: &str) -> Key {
-    let bytes = hex::decode(hex).unwrap_or_else(|_| {
-        let mut padded = [0u8; 64];
-        for (i, b) in hex.as_bytes().iter().enumerate().take(64) {
-            padded[i] = *b;
-        }
-        padded.to_vec()
-    });
-    if bytes.len() >= 64 {
-        Key::from(&bytes[..64])
-    } else {
-        let mut padded = [0u8; 64];
-        for (i, b) in bytes.iter().enumerate().take(64) {
-            padded[i] = *b;
-        }
-        Key::from(&padded)
-    }
+    let bytes = hex::decode(hex).expect("SESSION_KEY validated at config load");
+    Key::from(&bytes[..64])
 }
 
 #[derive(Debug, Clone)]
@@ -92,13 +81,16 @@ fn parse_cookie(raw: &str) -> Option<(&str, &str)> {
     Some((sub, email))
 }
 
-fn write_cookie(jar: SignedCookieJar, sub: &str, email: &str) -> SignedCookieJar {
+fn write_cookie(jar: SignedCookieJar, sub: &str, email: &str, secure: bool) -> SignedCookieJar {
     let value = format!("{sub}|{email}");
     let cookie = Cookie::build((COOKIE_NAME, value))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        .secure(false)
+        // Secure in prod (served over HTTPS behind Caddy). Disabled only
+        // under DEV_AUTH where the dev server is plain-HTTP localhost — a
+        // Secure cookie would never be set there.
+        .secure(secure)
         .build();
     jar.add(cookie)
 }
@@ -145,7 +137,7 @@ pub async fn login(
             .path("/")
             .http_only(true)
             .same_site(SameSite::Lax)
-            .secure(false)
+            .secure(!state.cfg.dev_auth)
             .max_age(time::Duration::minutes(10))
             .build();
         return Ok((jar.add(cookie), Redirect::to(auth.url.as_str())).into_response());
@@ -156,7 +148,11 @@ pub async fn login(
         let user = q.username.unwrap_or_else(|| "dev".to_string());
         let email = q.email.unwrap_or_else(|| format!("{user}@local"));
         let _profile = profile::resolve_or_create(&state, &user, &email).await?;
-        return Ok((write_cookie(jar, &user, &email), Redirect::to(&dest)).into_response());
+        return Ok((
+            write_cookie(jar, &user, &email, !state.cfg.dev_auth),
+            Redirect::to(&dest),
+        )
+            .into_response());
     }
 
     // 3. Nothing configured.
@@ -239,7 +235,11 @@ pub async fn callback(
     let _profile = profile::resolve_or_create(&state, &claims.sub, &claims.email).await?;
 
     let dest = sanitize_next(Some(dest));
-    Ok((write_cookie(cleared, &claims.sub, &claims.email), Redirect::to(&dest)).into_response())
+    Ok((
+        write_cookie(cleared, &claims.sub, &claims.email, !state.cfg.dev_auth),
+        Redirect::to(&dest),
+    )
+        .into_response())
 }
 
 /// `POST /auth/logout`
