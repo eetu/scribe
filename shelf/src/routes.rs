@@ -5,6 +5,7 @@ use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
@@ -374,6 +375,12 @@ async fn item_cover(
         })
         .await?;
     let url = cover_url.ok_or(ShelfError::NotFound)?;
+    // SSRF guard: only fetch https Amazon/Audible CDN hosts. cover_url is
+    // ingested from Audible, but this route is unauthenticated and proxies
+    // it server-side, so don't let it reach internal hosts.
+    if !cover_host_allowed(&url) {
+        return Err(ShelfError::NotFound);
+    }
     // Proxy the Audible CDN cover through the client's authenticated
     // session so the iOS app doesn't need its own CORS / referer dance.
     let resp = state
@@ -385,16 +392,27 @@ async fn item_cover(
     if !resp.status().is_success() {
         return Err(ShelfError::NotFound);
     }
+    if let Some(len) = resp.content_length() {
+        if len > MAX_COVER_BYTES as u64 {
+            return Err(ShelfError::NotFound);
+        }
+    }
     let content_type = resp
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("image/jpeg")
         .to_string();
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| ShelfError::Internal(anyhow::anyhow!(e)))?;
+    // Stream with a hard cap so a missing/lying Content-Length can't OOM us.
+    let mut stream = resp.bytes_stream();
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| ShelfError::Internal(anyhow::anyhow!(e)))?;
+        if bytes.len() + chunk.len() > MAX_COVER_BYTES {
+            return Err(ShelfError::NotFound);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     Ok((
         [
             (header::CONTENT_TYPE, content_type),
@@ -406,6 +424,36 @@ async fn item_cover(
 }
 
 // ---------- helpers ----------
+
+/// Hard ceiling on a proxied cover. Real covers are well under 1 MB.
+const MAX_COVER_BYTES: usize = 16 * 1024 * 1024;
+
+/// Amazon/Audible CDN hosts a cover may come from. The cover route is
+/// unauthenticated and proxies `cover_url` server-side, so restrict it to
+/// https on these hosts — otherwise it's an unauthenticated SSRF primitive
+/// against loopback / link-local metadata / internal LAN.
+const ALLOWED_COVER_HOSTS: &[&str] = &[
+    "media-amazon.com",
+    "ssl-images-amazon.com",
+    "images-amazon.com",
+    "amazon.com",
+    "audible.com",
+];
+
+fn cover_host_allowed(raw: &str) -> bool {
+    let Ok(u) = url::Url::parse(raw) else {
+        return false;
+    };
+    if u.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = u.host_str() else {
+        return false;
+    };
+    ALLOWED_COVER_HOSTS
+        .iter()
+        .any(|s| host == *s || host.ends_with(&format!(".{s}")))
+}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

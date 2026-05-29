@@ -10,9 +10,43 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use futures_util::StreamExt;
+
 use crate::state::AppState;
 
 const KNOWN_EXTS: &[&str] = &["jpg", "png", "webp", "gif"];
+
+/// Hard ceiling on a fetched cover. Real covers are well under 1 MB; this
+/// is a generous bound that stops a hostile/compromised CDN from streaming
+/// an unbounded body and OOMing the 1 GB Pi.
+const MAX_COVER_BYTES: usize = 16 * 1024 * 1024;
+
+/// Amazon/Audible CDN hosts a cover may legitimately come from. `cover_url`
+/// is ingested from Audible's API (not user input), but proxying it
+/// server-side is still an SSRF surface — restrict to https on these hosts
+/// so it can't be pointed at loopback / link-local metadata / internal LAN.
+const ALLOWED_COVER_HOSTS: &[&str] = &[
+    "media-amazon.com",
+    "ssl-images-amazon.com",
+    "images-amazon.com",
+    "amazon.com",
+    "audible.com",
+];
+
+fn cover_host_allowed(raw: &str) -> bool {
+    let Ok(u) = url::Url::parse(raw) else {
+        return false;
+    };
+    if u.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = u.host_str() else {
+        return false;
+    };
+    ALLOWED_COVER_HOSTS
+        .iter()
+        .any(|s| host == *s || host.ends_with(&format!(".{s}")))
+}
 
 fn mime_for_ext(ext: &str) -> &'static str {
     match ext {
@@ -74,11 +108,29 @@ pub async fn fetch_and_store(
     cover_url: &str,
 ) -> anyhow::Result<(PathBuf, &'static str)> {
     let asin = sanitize_asin(asin).ok_or_else(|| anyhow::anyhow!("invalid asin"))?;
+    if !cover_host_allowed(cover_url) {
+        anyhow::bail!("cover_url host not allowed: {cover_url}");
+    }
     let dir = &state.cfg.covers_dir;
     tokio::fs::create_dir_all(dir).await?;
 
     let resp = state.http.get(cover_url).send().await?.error_for_status()?;
-    let bytes = resp.bytes().await?;
+    // Reject early on an honest-but-huge Content-Length, then cap the
+    // actual read so a missing/lying length can't OOM us either.
+    if let Some(len) = resp.content_length() {
+        if len > MAX_COVER_BYTES as u64 {
+            anyhow::bail!("cover too large: {len} bytes");
+        }
+    }
+    let mut stream = resp.bytes_stream();
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if bytes.len() + chunk.len() > MAX_COVER_BYTES {
+            anyhow::bail!("cover exceeds {MAX_COVER_BYTES} bytes");
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     let ext = sniff_ext(&bytes)
         .ok_or_else(|| anyhow::anyhow!("cover payload not a known image type"))?;
 
@@ -180,4 +232,35 @@ pub fn spawn_boot_cache(state: AppState) {
             tracing::info!(cached, "cover backfill complete");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cover_host_allowed;
+
+    #[test]
+    fn allows_amazon_audible_https() {
+        assert!(cover_host_allowed(
+            "https://m.media-amazon.com/images/I/abc.jpg"
+        ));
+        assert!(cover_host_allowed(
+            "https://images-na.ssl-images-amazon.com/x.jpg"
+        ));
+        assert!(cover_host_allowed("https://audible.com/cover.jpg"));
+    }
+
+    #[test]
+    fn rejects_non_https() {
+        assert!(!cover_host_allowed("http://m.media-amazon.com/x.jpg"));
+    }
+
+    #[test]
+    fn rejects_internal_and_other_hosts() {
+        assert!(!cover_host_allowed("https://127.0.0.1/x.jpg"));
+        assert!(!cover_host_allowed("https://169.254.169.254/latest/meta-data"));
+        assert!(!cover_host_allowed("https://evil.com/x.jpg"));
+        // suffix-spoof attempt: not a real amazon subdomain.
+        assert!(!cover_host_allowed("https://media-amazon.com.evil.com/x.jpg"));
+        assert!(!cover_host_allowed("file:///etc/passwd"));
+    }
 }
