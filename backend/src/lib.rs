@@ -68,8 +68,14 @@ pub async fn run_server() -> anyhow::Result<()> {
     let cfg = Config::from_env()?;
     let db = Db::open(&cfg.db_path)?;
     let cookie_key = auth::cookie_key(&cfg.session_key_hex);
+    // Timeouts so a hung shim/CDN (TCP accept but no response — common when
+    // the loopback sidecar is restarting) can't wedge the poller or a queue
+    // worker forever. All callers here move small JSON or covers; large book
+    // IO is press-side, not this client.
     let http = reqwest::Client::builder()
         .user_agent(concat!("scribe/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
         .build()?;
 
     // Discover OIDC at boot if env vars present. A failure here logs and

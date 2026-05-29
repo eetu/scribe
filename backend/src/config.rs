@@ -63,14 +63,15 @@ impl OidcSettings {
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
+        let dev_auth = env::var("DEV_AUTH").as_deref() == Ok("1");
+        let session_key_hex = resolve_session_key(dev_auth)?;
         Ok(Self {
             bind: env::var("SCRIBE_BIND").unwrap_or_else(|_| "0.0.0.0:3003".into()),
             db_path: env::var("SCRIBE_DB_PATH")
                 .unwrap_or_else(|_| "scribe.db".into())
                 .into(),
-            session_key_hex: env::var("SESSION_KEY")
-                .unwrap_or_else(|_| ephemeral_session_key()),
-            dev_auth: env::var("DEV_AUTH").as_deref() == Ok("1"),
+            session_key_hex,
+            dev_auth,
             shim_url: env::var("SCRIBE_SHIM_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:3004".into()),
             press_url: env::var("SCRIBE_PRESS_URL").ok(),
@@ -138,14 +139,49 @@ impl Config {
     }
 }
 
-fn ephemeral_session_key() -> String {
-    // 128 hex chars = 64 bytes — meets axum-extra's signed cookie key length.
-    // Not random across boots; sessions invalidate on restart in this fallback,
-    // which is the right behaviour when nothing was configured.
-    let bytes: [u8; 64] = std::array::from_fn(|i| (i as u8).wrapping_mul(31));
-    let mut s = String::with_capacity(128);
-    for b in &bytes {
-        s.push_str(&format!("{:02x}", b));
+/// Resolve the signed-cookie key. The cookie is the *entire* auth
+/// credential (sessions aren't persisted server-side), so the key must be
+/// strong and secret:
+///   - `SESSION_KEY` set → require ≥64 bytes of valid hex, else hard error.
+///   - unset + `DEV_AUTH` → random per-boot key (sessions drop on restart).
+///   - unset + prod → fail closed. A predictable/derivable key would let
+///     anyone forge a `scribe_session` cookie and authenticate as any user.
+fn resolve_session_key(dev_auth: bool) -> anyhow::Result<String> {
+    match env::var("SESSION_KEY") {
+        Ok(k) if !k.trim().is_empty() => {
+            let k = k.trim().to_string();
+            let decoded = hex::decode(&k).map_err(|_| {
+                anyhow::anyhow!("SESSION_KEY must be hex (128 chars = 64 bytes)")
+            })?;
+            if decoded.len() < 64 {
+                anyhow::bail!(
+                    "SESSION_KEY too short: {} bytes decoded, need ≥64 (128 hex chars). \
+                     Generate one with `openssl rand -hex 64`",
+                    decoded.len()
+                );
+            }
+            Ok(k)
+        }
+        _ => {
+            if dev_auth {
+                tracing::warn!(
+                    "SESSION_KEY unset; using a random ephemeral key (DEV_AUTH only). \
+                     Sessions drop on restart."
+                );
+                Ok(random_session_key())
+            } else {
+                anyhow::bail!(
+                    "SESSION_KEY is required when DEV_AUTH is off. \
+                     Generate one with `openssl rand -hex 64`"
+                )
+            }
+        }
     }
-    s
+}
+
+fn random_session_key() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 64];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

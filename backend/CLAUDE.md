@@ -169,6 +169,6 @@ machinery that was already torn out.
 | `SCRIBE_AUTO_ENQUEUE` | `0` | poller auto-queues new books on discovery; `0` = manual download only (default), `1` = production auto-sync. Cold-start with `1`: see "First deploy" below — every book in the linked accounts gets queued. |
 | `SCRIBE_JOB_INTERJOB_DELAY_S` | `60` | seconds the worker sleeps between jobs (mid-window inter-job pacing) |
 | `SCRIBE_JOB_INTERJOB_JITTER_PERCENT` | `50` | uniform ± randomness on each inter-job sleep |
-| `SESSION_KEY` | _ephemeral_ | 64-byte hex |
+| `SESSION_KEY` | _required if `DEV_AUTH=0`_ | 64-byte hex (`openssl rand -hex 64`). Boot fails without it in prod; random per-boot key under `DEV_AUTH=1` |
 | `DEV_AUTH` | `0` | dev login fallback |
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URL` | unset | kanidm config |

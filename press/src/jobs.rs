@@ -24,15 +24,62 @@ impl Drm {
                 if key_hex.len() != 32 || iv_hex.len() != 32 {
                     return Err("aaxc: key_hex and iv_hex must be 32 hex chars (16 bytes) each");
                 }
+                // Charset check, not just length: these flow straight onto the
+                // ffmpeg command line (-audible_key/-audible_iv). A non-hex value
+                // (e.g. one starting with `-`) would be parsed by ffmpeg as a
+                // flag rather than a key. Reject anything that isn't hex.
+                if !key_hex.bytes().all(|b| b.is_ascii_hexdigit())
+                    || !iv_hex.bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return Err("aaxc: key_hex and iv_hex must be hexadecimal");
+                }
                 Ok(())
             }
             Drm::Aax { activation_bytes } => {
                 if activation_bytes.len() != 8 {
                     return Err("aax: activation_bytes must be 8 hex chars (4 bytes)");
                 }
+                if !activation_bytes.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err("aax: activation_bytes must be hexadecimal");
+                }
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Drm;
+
+    fn aaxc(key: &str, iv: &str) -> Drm {
+        Drm::Aaxc { key_hex: key.into(), iv_hex: iv.into() }
+    }
+
+    #[test]
+    fn aaxc_valid_hex_ok() {
+        assert!(aaxc(&"a".repeat(32), &"0".repeat(32)).validate().is_ok());
+    }
+
+    #[test]
+    fn aaxc_wrong_length_rejected() {
+        assert!(aaxc(&"a".repeat(31), &"0".repeat(32)).validate().is_err());
+    }
+
+    #[test]
+    fn aaxc_non_hex_rejected() {
+        // right length, but not hex — would otherwise reach the ffmpeg argv.
+        assert!(aaxc("-y -f mp4 /etc/passwd zzzzzzzzzz", &"0".repeat(32))
+            .validate()
+            .is_err());
+        assert!(aaxc(&"g".repeat(32), &"0".repeat(32)).validate().is_err());
+    }
+
+    #[test]
+    fn aax_charset_enforced() {
+        assert!(Drm::Aax { activation_bytes: "deadbeef".into() }.validate().is_ok());
+        assert!(Drm::Aax { activation_bytes: "-y deadb".into() }.validate().is_err());
+        assert!(Drm::Aax { activation_bytes: "zzzzzzzz".into() }.validate().is_err());
     }
 }
 
