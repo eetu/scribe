@@ -121,26 +121,41 @@ pub async fn login(
 ) -> Result<Response, AppError> {
     let dest = sanitize_next(q.next.as_deref());
 
-    // 1. OIDC if discovered.
-    if let Some(oidc) = &state.oidc {
-        let auth = oidc.authorize();
-        // Stash the handshake values in a separate signed cookie so the
-        // callback can pull them back. Format: csrf|nonce|pkce|next.
-        let payload = format!(
-            "{}|{}|{}|{}",
-            auth.csrf.secret(),
-            auth.nonce.secret(),
-            auth.pkce_verifier.secret(),
-            dest
-        );
-        let cookie = Cookie::build((OIDC_COOKIE, payload))
-            .path("/")
-            .http_only(true)
-            .same_site(SameSite::Lax)
-            .secure(!state.cfg.dev_auth)
-            .max_age(time::Duration::minutes(10))
-            .build();
-        return Ok((jar.add(cookie), Redirect::to(auth.url.as_str())).into_response());
+    // 1. OIDC if configured. Discovery is lazy + retried (see OidcLazy), so
+    // a kanidm that was down at boot recovers here without a restart.
+    if state.oidc.is_configured() {
+        match state.oidc.ctx().await {
+            Some(oidc) => {
+                let auth = oidc.authorize();
+                // Stash the handshake values in a separate signed cookie so the
+                // callback can pull them back. Format: csrf|nonce|pkce|next.
+                let payload = format!(
+                    "{}|{}|{}|{}",
+                    auth.csrf.secret(),
+                    auth.nonce.secret(),
+                    auth.pkce_verifier.secret(),
+                    dest
+                );
+                let cookie = Cookie::build((OIDC_COOKIE, payload))
+                    .path("/")
+                    .http_only(true)
+                    .same_site(SameSite::Lax)
+                    .secure(!state.cfg.dev_auth)
+                    .max_age(time::Duration::minutes(10))
+                    .build();
+                return Ok((jar.add(cookie), Redirect::to(auth.url.as_str())).into_response());
+            }
+            // Configured but the issuer isn't reachable yet. In prod, surface
+            // a retryable 503 rather than silently downgrading to DEV_AUTH;
+            // re-discovery fires on the next /status poll or login attempt.
+            // In dev, fall through to the DEV_AUTH path below.
+            None if !state.cfg.dev_auth => {
+                return Err(AppError::ServiceUnavailable(
+                    "auth provider not reachable; retry shortly".into(),
+                ));
+            }
+            None => {}
+        }
     }
 
     // 2. DEV_AUTH fallback.
@@ -175,10 +190,9 @@ pub async fn callback(
     jar: SignedCookieJar,
     Query(q): Query<CallbackQuery>,
 ) -> Result<Response, AppError> {
-    let oidc = state
-        .oidc
-        .as_ref()
-        .ok_or_else(|| AppError::BadRequest("oidc not configured".into()))?;
+    let oidc = state.oidc.ctx().await.ok_or_else(|| {
+        AppError::ServiceUnavailable("auth provider not reachable; retry shortly".into())
+    })?;
 
     if let Some(err) = &q.error {
         tracing::warn!(

@@ -15,6 +15,11 @@ pub enum AppError {
     BadRequest(String),
     #[error("upstream: {0}")]
     Upstream(String),
+    /// A dependency needed to serve this request is configured but not yet
+    /// reachable — e.g. the OIDC issuer was down at boot and re-discovery
+    /// hasn't succeeded yet. Retryable; the caller should try again shortly.
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
     /// Audible refused to issue a voucher (410 from shim). Plus catalog
     /// rotation, cross-region denial, or otherwise unplayable. Terminal —
     /// no retry will help, and the user-facing label should explain the
@@ -33,6 +38,7 @@ impl AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Upstream(_) => StatusCode::BAD_GATEWAY,
+            AppError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::LicenseDenied(_) => StatusCode::GONE,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -50,7 +56,10 @@ impl IntoResponse for AppError {
             tracing::error!(?self, "request failed");
         } else if matches!(
             self,
-            AppError::Forbidden | AppError::Upstream(_) | AppError::LicenseDenied(_)
+            AppError::Forbidden
+                | AppError::Upstream(_)
+                | AppError::ServiceUnavailable(_)
+                | AppError::LicenseDenied(_)
         ) {
             tracing::warn!(?self, "request rejected");
         }
