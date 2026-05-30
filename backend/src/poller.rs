@@ -23,7 +23,7 @@
 use std::time::Duration;
 
 use chrono::{Local, Timelike};
-use rand::Rng;
+use rand::RngExt; // rand 0.10: random_range moved to the RngExt trait
 
 use crate::error::AppError;
 use crate::profile;

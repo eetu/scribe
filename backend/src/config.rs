@@ -190,7 +190,7 @@ fn resolve_session_key(dev_auth: bool) -> anyhow::Result<String> {
 }
 
 fn random_session_key() -> String {
-    use rand::RngCore;
+    use rand::Rng; // rand 0.10: fill_bytes moved from RngCore to Rng
     let mut bytes = [0u8; 64];
     rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
