@@ -50,10 +50,12 @@ def fetch(auth: audible.Authenticator, asin: str) -> dict[str, Any]:
             message,
             sorted((lr or {}).keys()),
         )
+        # Don't echo `lr` back — it's the full encrypted license response
+        # (key-adjacent material). The caller only needs status/message; the
+        # rest is logged above for debugging.
         return {
             "_error": "license_not_granted",
             "_detail": f"{status}: {message}" if message else status,
-            "raw": lr,
         }
 
     metadata = content_license.get("content_metadata") or {}
