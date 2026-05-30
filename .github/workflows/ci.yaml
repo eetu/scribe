@@ -55,6 +55,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv run ruff check src
       # Smoke-import the FastAPI app so a broken module surfaces in CI
       # before reaching the deploy step. Routes are exercised against
       # real Audible in the periodic smoke test, not here.
