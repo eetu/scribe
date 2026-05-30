@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
 use crate::abs;
-use crate::auth::bearer_guard;
+use crate::auth::{bearer_guard, bearer_guard_stream};
 use crate::error::{ShelfError, ShelfResult};
 use crate::state::ShelfState;
 
@@ -26,17 +26,28 @@ pub fn router(state: ShelfState) -> Router {
     let unauth = Router::new()
         .route("/api/items/{id}/cover", get(item_cover))
         .with_state(state.clone());
+    // The audio stream is the one route AVFoundation / a plain <audio> src
+    // can only auth via ?token= (no custom header on a media URL), so it
+    // gets the stream guard. Everything else is header-only — keeps the
+    // long-lived key out of access/proxy logs for routine API calls.
+    let stream = Router::new()
+        .route("/api/items/{id}/file/{ino}", get(item_file))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            bearer_guard_stream,
+        ))
+        .with_state(state.clone());
     let protected = Router::new()
         .route("/api/me", get(me))
         .route("/api/libraries", get(libraries))
         .route("/api/libraries/{id}/items", get(library_items))
         .route("/api/items/{id}", get(item_detail))
-        .route("/api/items/{id}/file/{ino}", get(item_file))
         .route_layer(middleware::from_fn_with_state(state.clone(), bearer_guard))
         .with_state(state.clone());
     Router::new()
         .route("/ping", get(ping))
         .merge(unauth)
+        .merge(stream)
         .merge(protected)
 }
 

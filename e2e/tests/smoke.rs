@@ -71,6 +71,13 @@ async fn full_stack_smoke() {
         401,
         "shelf /api/libraries must require the api key"
     );
+    // The ?token= query is scoped to the audio stream route only — it must
+    // NOT authorize the JSON/metadata routes (keeps the key out of logs).
+    assert_eq!(
+        s.code(&format!("{}/api/libraries?token={}", s.shelf, s.shelf_key)).await,
+        401,
+        "query token must not authorize JSON routes"
+    );
     let libs = s
         .http
         .get(format!("{}/api/libraries", s.shelf))
