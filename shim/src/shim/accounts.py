@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -28,12 +29,21 @@ _cache: dict[str, audible.Authenticator] = {}
 _cache_lock = threading.Lock()
 
 
+# account_id is always the 16-char hex prefix of a sha256 (see
+# derive_account_id). Validating against that here is the single choke point
+# for load/save/evict, so an account_id taken from a URL path can never be a
+# path-traversal payload (`../…`) that escapes the accounts dir.
+_ACCOUNT_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
 def derive_account_id(locale: str, customer_id: str) -> str:
     h = hashlib.sha256(f"{locale}:{customer_id}".encode()).hexdigest()
     return h[:16]
 
 
 def _path_for(account_id: str) -> Path:
+    if not _ACCOUNT_ID_RE.fullmatch(account_id):
+        raise KeyError(account_id)
     return accounts_dir() / f"{account_id}.json"
 
 

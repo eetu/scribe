@@ -53,6 +53,15 @@ def _http_error(status: int, code: str, detail: str = "", needs_relogin: bool = 
     )
 
 
+def _safe_detail(exc: Exception) -> str:
+    # Don't surface raw upstream exception text in the HTTP response —
+    # mkb79/httpx messages can embed request URLs, headers, or response
+    # bodies (token fragments, signed CDN URLs). The class name is enough to
+    # disambiguate for the caller; the full exception is in the server log
+    # via the preceding log.exception(...).
+    return type(exc).__name__
+
+
 def _load_or_404(account_id: str):
     try:
         return accounts.load(account_id)
@@ -107,7 +116,7 @@ def deregister(account_id: str) -> dict[str, Any]:
         auth.deregister_device()
     except Exception as exc:  # noqa: BLE001
         log.exception("deregister failed for %s", account_id)
-        raise _http_error(502, "deregister_failed", str(exc))
+        raise _http_error(502, "deregister_failed", _safe_detail(exc))
     accounts.evict(account_id)
     return {"deregistered": True}
 
@@ -119,7 +128,7 @@ def refresh(account_id: str) -> dict[str, Any]:
         auth.refresh_access_token(force=True)
     except Exception as exc:  # noqa: BLE001
         log.exception("refresh failed for %s", account_id)
-        raise _http_error(401, "refresh_failed", str(exc), needs_relogin=True)
+        raise _http_error(401, "refresh_failed", _safe_detail(exc), needs_relogin=True)
     accounts.save(account_id, auth)
     return {"expires_at": int(auth.expires) if auth.expires else 0}
 
@@ -136,7 +145,7 @@ def get_library(
         return library.fetch(auth, page=page, num_results=num_results, status=status)
     except Exception as exc:  # noqa: BLE001
         log.exception("library fetch failed for %s", account_id)
-        raise _http_error(502, "library_failed", str(exc))
+        raise _http_error(502, "library_failed", _safe_detail(exc))
 
 
 @app.get("/accounts/{account_id}/books/{asin}/voucher")
@@ -146,7 +155,7 @@ def get_voucher(account_id: str, asin: str) -> dict[str, Any]:
         res = voucher.fetch(auth, asin)
     except Exception as exc:  # noqa: BLE001
         log.exception("voucher fetch failed for %s/%s", account_id, asin)
-        raise _http_error(502, "voucher_failed", str(exc))
+        raise _http_error(502, "voucher_failed", _safe_detail(exc))
     if "_error" in res:
         raise _http_error(410 if res["_error"] == "license_not_granted" else 502, res["_error"], res.get("_detail", ""))
     return res
@@ -159,7 +168,7 @@ def get_metadata(account_id: str, asin: str) -> dict[str, Any]:
         return voucher.fetch_metadata(auth, asin)
     except Exception as exc:  # noqa: BLE001
         log.exception("metadata fetch failed for %s/%s", account_id, asin)
-        raise _http_error(502, "metadata_failed", str(exc))
+        raise _http_error(502, "metadata_failed", _safe_detail(exc))
 
 
 @app.get("/accounts/{account_id}/books/{asin}/pdf")
