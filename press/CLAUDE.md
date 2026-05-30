@@ -1,9 +1,14 @@
-# press — mini-side ffmpeg worker
+# press — ffmpeg worker
 
-axum 0.8 service running on the Mac mini. Receives JobSpecs from scribe
-(Pi) over LAN, downloads AAXC from Audible CDN to local SSD, decrypts +
+axum 0.8 service. Receives JobSpecs from scribe over LAN (or loopback when
+co-located), downloads AAXC from Audible CDN to local disk, decrypts +
 remuxes to M4B (fragmented MP4) via ffmpeg subprocess, exposes both
 artifacts to scribe over HTTP, then cleans up on DELETE.
+
+Runs on any LAN host — a separate box for headroom, or right on the Pi
+alongside scribe. The ffmpeg step is a lossless remux (`-c copy`), not a
+re-encode, so it's light enough that a Pi handles it; a dedicated host is
+an optional throughput choice, not a requirement.
 
 Stateless across restarts — any in-flight job on boot is lost and must be
 re-enqueued by scribe.
@@ -44,8 +49,8 @@ ffmpeg -hide_banner -loglevel error -nostdin \
 ## Concurrency
 
 `PRESS_MAX_JOBS` (default 2). tokio semaphore around the ffmpeg
-subprocess. Mini has the headroom but ffmpeg saturates a core and
-audio CDN downloads benefit from sequencing.
+subprocess. Remux saturates a core and CDN downloads benefit from
+sequencing, so keep this low on the Pi; raise it on a beefier host.
 
 ## Tmp layout
 

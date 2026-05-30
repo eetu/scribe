@@ -10,7 +10,7 @@ env:
   REGISTRY: ghcr.io
   # Backend image keeps the bare `scribe` name. Sibling packages:
   # `scribe-shim` (Audible sidecar) and `scribe-press` (DRM-strip
-  # worker, optional — usually runs native on the mini via launchd).
+  # worker, optional — usually runs native on its host via launchd/systemd).
   IMAGE_BACKEND: ${{ github.repository }}
   IMAGE_SHIM: ${{ github.repository }}-shim
   IMAGE_PRESS: ${{ github.repository }}-press

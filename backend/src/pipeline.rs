@@ -6,7 +6,7 @@
 //!   3. poll press status until ready/failed
 //!   4. stream press → backup NAS (raw AAX/AAXC)
 //!   5. stream press → library NAS (decrypted M4B)
-//!   6. DELETE press job (cleans tmp on mini)
+//!   6. DELETE press job (cleans tmp on the press host)
 //!   7. notify ABS to rescan
 //!
 //! Filenaming uses a placeholder pattern in this skeleton; task #9 ports

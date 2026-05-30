@@ -29,9 +29,9 @@ COPY press/Cargo.toml press/Cargo.toml
 COPY shared/Cargo.toml shared/Cargo.toml
 COPY shelf/Cargo.toml shelf/Cargo.toml
 # Stub sources for every workspace member. Press isn't shipped in the
-# backend image (it runs native on the mini), but cargo still demands
-# every declared member's manifest target exists on disk for workspace
-# discovery to succeed.
+# backend image (it usually runs as a native binary on its host), but
+# cargo still demands every declared member's manifest target exists on
+# disk for workspace discovery to succeed.
 RUN mkdir -p backend/src press/src shared/src shelf/src \
     && printf 'fn main() {}\n' > backend/src/main.rs \
     && : > backend/src/lib.rs \
@@ -53,11 +53,11 @@ RUN touch shared/src/lib.rs backend/src/main.rs backend/src/lib.rs \
 
 # --- Stage 3b: Build scribe-press ---
 #
-# Press normally runs as a native binary on the Mac mini (built via
-# cargo, deployed via launchd by the mini IaC). This image exists as a
-# fallback for any future host with enough headroom — e.g. a Pi 5 or
-# an x86 box — where launchd isn't an option. Skipped from the default
-# CI gate unless the press image flag is flipped on.
+# Press normally runs as a native binary on its host (built via cargo,
+# deployed via launchd/systemd by the host IaC). This image exists as a
+# fallback for any host where a native binary isn't an option (e.g. a
+# containers-only box). Skipped from the default CI gate unless the
+# press image flag is flipped on.
 FROM workspace-deps AS press-build
 ARG TARGETPLATFORM
 COPY shared/src ./shared/src

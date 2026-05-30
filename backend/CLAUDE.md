@@ -2,7 +2,7 @@
 
 axum 0.8 service running on the raspi. Hosts the React UI, owns SQLite
 state, talks to shim (loopback :3004) for Audible-side work, and
-orchestrates scribe-press (mini, HTTPS+bearer) for ffmpeg.
+orchestrates scribe-press (HTTP+bearer; co-located or a separate LAN host) for ffmpeg.
 
 ## Routes
 
@@ -163,7 +163,7 @@ machinery that was already torn out.
 |---|---|---|
 | `SCRIBE_DB_PATH` | `scribe.db` | SQLite file |
 | `SCRIBE_SHIM_URL` | `http://127.0.0.1:3004` | sidecar |
-| `SCRIBE_PRESS_URL` | unset | mini-side worker base URL |
+| `SCRIBE_PRESS_URL` | unset | press worker base URL (loopback if co-located, else its LAN URL) |
 | `SCRIBE_PRESS_TOKEN` | unset | bearer for press auth |
 | `SCRIBE_LIBRARY_DIR` | `/mnt/audiobooks/library` | M4B output root |
 | `SCRIBE_ORIGINAL_DIR` | `/mnt/audiobooks/original` | untouched AAXC/AAX downloads from Audible |
@@ -176,7 +176,7 @@ machinery that was already torn out.
 | `ABS_LIBRARY_ID` | unset | ABS library id to rescan |
 | `SCRIBE_FILENAME_TEMPLATE_M4B` | `{author?}/{series_title?}/[#{series_num} - ]{title}/{title}.m4b` | M4B path template — see filenaming.rs |
 | `SCRIBE_FILENAME_TEMPLATE_ORIGINAL` | `{author?}/{series_title?}/{title}-{asin}.aaxc` | original-file path template |
-| `SCRIBE_JOB_CONCURRENCY` | `1` | parallel ffmpeg jobs (raise on mini, leave at 1 on Pi) |
+| `SCRIBE_JOB_CONCURRENCY` | `1` | parallel ffmpeg jobs (leave at 1 on Pi; raise when press has more headroom) |
 | `SCRIBE_JOB_RETRY_MAX` | `3` | transient-failure retry cap |
 | `SCRIBE_AUTO_ENQUEUE` | `0` | poller auto-queues new books on discovery; `0` = manual download only (default), `1` = production auto-sync. Cold-start with `1`: see "First deploy" below — every book in the linked accounts gets queued. |
 | `SCRIBE_JOB_INTERJOB_DELAY_S` | `60` | seconds the worker sleeps between jobs (mid-window inter-job pacing) |

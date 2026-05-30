@@ -11,7 +11,7 @@ tokens, fonts, and warm orange accent. Only the wordmark glyph and the
 layout density differ.
 
 - Polls Audible every 5 min (configurable), auto-downloads new purchases
-- Streams via mini worker (ffmpeg) so the Pi never holds a full file
+- Streams via the press worker (ffmpeg) so scribe never holds a full file
 - Keeps original AAXC alongside as cold backup (separate NAS tree)
 - Notifies audiobookshelf to rescan on completion
 - One row per job; tap-and-hold to cancel

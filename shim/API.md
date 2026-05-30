@@ -250,7 +250,7 @@ decrypt any AAX file purchased by a given Audible account. mkb79
 exposes it via `auth.activation_bytes` once an account is registered.
 
 `content_url` accepts `https://` (Audible CDN) or `file://` (local
-path on the mini SSD, used for testing against the OpenAudible backlog
+path on the press host, used for testing against the OpenAudible backlog
 without going through the CDN). file:// short-circuits the download
 step — same bytes copied into the job dir.
 
