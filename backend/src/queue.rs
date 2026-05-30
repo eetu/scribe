@@ -137,7 +137,7 @@ impl Queue {
                     if base > 0 {
                         let jitter_pct = inner.state.cfg.job_interjob_jitter_percent.min(95) as f64 / 100.0;
                         let factor = {
-                            use rand::Rng;
+                            use rand::RngExt; // rand 0.10: random_range is on RngExt
                             1.0 + rand::rng().random_range(-jitter_pct..=jitter_pct)
                         };
                         let secs = ((base as f64) * factor).max(1.0) as u64;
