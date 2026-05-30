@@ -1949,6 +1949,7 @@ dependencies = [
 name = "scribe-e2e"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "reqwest",
  "serde_json",
  "tempfile",

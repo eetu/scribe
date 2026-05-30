@@ -46,6 +46,10 @@ async fn full_stack_smoke() {
     assert_eq!(me["sub"], "smoke", "session should resolve the dev user");
     let library = s.json(&format!("{}/api/library", s.backend)).await;
     assert_eq!(library["items"].as_array().map(|a| a.len()), Some(0), "library empty");
+    // /api/accounts proxies the bearer-gated shim /accounts — a 200 here
+    // proves the backend→shim shared-token auth works end to end.
+    let accounts = s.json(&format!("{}/api/accounts", s.backend)).await;
+    assert_eq!(accounts.as_array().map(|a| a.len()), Some(0), "no accounts (backend↔shim bearer ok)");
 
     // --- press auth boundary ---------------------------------------------
     assert_eq!(s.code(&format!("{}/health", s.press)).await, 200, "press /health anon");
@@ -59,10 +63,14 @@ async fn full_stack_smoke() {
         .as_u16();
     assert_eq!(press_jobs, 401, "press /jobs must require the bearer token");
 
-    // --- shim ------------------------------------------------------------
-    assert_eq!(s.code(&format!("{}/health", s.shim)).await, 200, "shim /health");
-    let accounts = s.json(&format!("{}/accounts", s.shim)).await;
-    assert_eq!(accounts.as_array().map(|a| a.len()), Some(0), "no accounts linked");
+    // --- shim auth boundary ----------------------------------------------
+    // /health is exempt (liveness); /accounts now requires the bearer.
+    assert_eq!(s.code(&format!("{}/health", s.shim)).await, 200, "shim /health anon");
+    assert_eq!(
+        s.code(&format!("{}/accounts", s.shim)).await,
+        401,
+        "shim /accounts must require the bearer token"
+    );
 
     // --- shelf auth + library --------------------------------------------
     assert_eq!(s.code(&format!("{}/ping", s.shelf)).await, 200, "shelf /ping anon");

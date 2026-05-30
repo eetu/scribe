@@ -2,18 +2,37 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import __version__, accounts, library, login, voucher
+from . import __version__, accounts, config, library, login, voucher
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="shim", version=__version__)
+
+# Optional shared-secret bearer. Loopback binding is the primary control;
+# this is defense-in-depth (firewall slip / sidecar escape). /health stays
+# open so liveness probes work without the secret.
+_SHIM_TOKEN = config.token()
+if _SHIM_TOKEN is None:
+    log.warning("SHIM_TOKEN unset — no bearer auth; relying on the loopback bind alone.")
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    if _SHIM_TOKEN is not None and request.url.path != "/health":
+        hdr = request.headers.get("authorization", "")
+        presented = hdr[7:].strip() if hdr[:7].lower() == "bearer " else ""
+        if not hmac.compare_digest(presented, _SHIM_TOKEN):
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await call_next(request)
 
 
 # ---------- request bodies ----------

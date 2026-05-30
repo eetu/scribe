@@ -163,6 +163,7 @@ machinery that was already torn out.
 |---|---|---|
 | `SCRIBE_DB_PATH` | `scribe.db` | SQLite file |
 | `SCRIBE_SHIM_URL` | `http://127.0.0.1:3004` | sidecar |
+| `SCRIBE_SHIM_TOKEN` | unset | optional shared-secret bearer for the shim (matches shim's `SHIM_TOKEN`); defense-in-depth over the loopback bind |
 | `SCRIBE_PRESS_URL` | unset | press worker base URL (loopback if co-located, else its LAN URL) |
 | `SCRIBE_PRESS_TOKEN` | unset | bearer for press auth |
 | `SCRIBE_LIBRARY_DIR` | `/mnt/audiobooks/library` | M4B output root |

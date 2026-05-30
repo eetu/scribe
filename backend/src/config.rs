@@ -8,6 +8,10 @@ pub struct Config {
     pub session_key_hex: String,
     pub dev_auth: bool,
     pub shim_url: String,
+    /// Optional shared-secret bearer for the shim. The shim is loopback-only
+    /// by default; when set it's sent on every shim request as
+    /// defense-in-depth against a firewall slip / sidecar escape.
+    pub shim_token: Option<String>,
     pub press_url: Option<String>,
     pub press_token: Option<String>,
     /// Optional shelf (read-only ABS-compat sidecar) base URL. Used
@@ -74,6 +78,7 @@ impl Config {
             dev_auth,
             shim_url: env::var("SCRIBE_SHIM_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:3004".into()),
+            shim_token: env::var("SCRIBE_SHIM_TOKEN").ok().filter(|s| !s.is_empty()),
             press_url: env::var("SCRIBE_PRESS_URL").ok(),
             press_token: env::var("SCRIBE_PRESS_TOKEN").ok(),
             shelf_url: env::var("SCRIBE_SHELF_URL").ok().filter(|s| !s.is_empty()),

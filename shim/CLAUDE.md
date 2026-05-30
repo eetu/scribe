@@ -4,10 +4,11 @@ Thin Python FastAPI wrapper around [mkb79/audible](https://github.com/mkb79/Audi
 (actively maintained, last docs update 2026-01-12, handles current Amazon
 push-approval login flow). Pure passthrough plus account-file persistence.
 
-Runs on the Pi loopback at `127.0.0.1:3004`. No external auth on the
-service itself — the only reachable client is the Rust app on the same
-host. Audible credentials sit on disk under
-`/var/lib/shim/accounts/<account_id>.json`, encrypted with a
+Runs on the Pi loopback at `127.0.0.1:3004`. The loopback bind is the
+primary access control; as defense-in-depth, setting `SHIM_TOKEN` requires
+`Authorization: Bearer <token>` on every request except `/health` (the
+backend sends it via `SCRIBE_SHIM_TOKEN`). Audible credentials sit on disk
+under `/var/lib/shim/accounts/<account_id>.json`, encrypted with a
 passphrase from `/etc/secrets/shim.env`.
 
 ## See also

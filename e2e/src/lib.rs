@@ -9,6 +9,7 @@
 //! -p scribe-press -p scribe-shelf`); `shim` is launched via `uv run shim`.
 //! The CI `e2e` job does the build first.
 
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -24,6 +25,7 @@ const SHELF_PORT: u16 = 3916;
 
 const PRESS_TOKEN: &str = "smoke-press-token-0123456789abcdef";
 const SHELF_KEY: &str = "smoke-shelf-apikey-0123456789abcdef";
+const SHIM_TOKEN: &str = "smoke-shim-token-0123456789abcdef";
 
 pub struct Stack {
     children: Vec<Child>,
@@ -63,9 +65,11 @@ impl Stack {
                 .env("SHIM_HOST", "127.0.0.1")
                 .env("SHIM_PORT", SHIM_PORT.to_string())
                 .env("SHIM_RELOAD", "0")
+                .env("SHIM_TOKEN", SHIM_TOKEN)
                 .env("SHIM_DATA_DIR", t.join("shim"))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .process_group(0) // lead a new group so Drop can kill grandchildren
                 .spawn()
                 .expect("spawn shim — is `uv` installed?"),
         );
@@ -78,6 +82,7 @@ impl Stack {
                 .env("PRESS_TMP_DIR", t.join("press"))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .process_group(0) // lead a new group so Drop can kill grandchildren
                 .spawn()
                 .expect("spawn press"),
         );
@@ -91,6 +96,7 @@ impl Stack {
                 .env("SCRIBE_BIND", format!("127.0.0.1:{BACKEND_PORT}"))
                 .env("SCRIBE_DB_PATH", &db)
                 .env("SCRIBE_SHIM_URL", format!("http://127.0.0.1:{SHIM_PORT}"))
+                .env("SCRIBE_SHIM_TOKEN", SHIM_TOKEN)
                 .env("SCRIBE_PRESS_URL", format!("http://127.0.0.1:{PRESS_PORT}"))
                 .env("SCRIBE_PRESS_TOKEN", PRESS_TOKEN)
                 .env("SCRIBE_SHELF_URL", format!("http://127.0.0.1:{SHELF_PORT}"))
@@ -103,6 +109,7 @@ impl Stack {
                 .env("OIDC_REDIRECT_URL", "")
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .process_group(0) // lead a new group so Drop can kill grandchildren
                 .spawn()
                 .expect("spawn backend"),
         );
@@ -127,6 +134,7 @@ impl Stack {
                 .env("SHELF_COVERS_DIR", t.join("covers"))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .process_group(0) // lead a new group so Drop can kill grandchildren
                 .spawn()
                 .expect("spawn shelf"),
         );
@@ -159,6 +167,12 @@ impl Stack {
 impl Drop for Stack {
     fn drop(&mut self) {
         for c in &mut self.children {
+            // Each child leads its own process group (process_group(0)), so
+            // SIGKILL the whole group — `uv run shim` spawns a python
+            // grandchild that a parent-only kill would orphan, leaving a
+            // stale server bound to the fixed test port.
+            let pid = c.id() as libc::pid_t;
+            unsafe { libc::kill(-pid, libc::SIGKILL) };
             let _ = c.kill();
             let _ = c.wait();
         }
