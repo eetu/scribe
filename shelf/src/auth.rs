@@ -15,38 +15,60 @@ use subtle::ConstantTimeEq;
 use crate::error::ShelfError;
 use crate::state::ShelfState;
 
+/// Header-only guard for the JSON/metadata routes (`/api/me`,
+/// `/api/libraries`, `/api/items/{id}`, …). These are all called from code
+/// that can set an `Authorization` header, so the long-lived key has no
+/// reason to ride in the query string — where it would land in access /
+/// reverse-proxy logs and browser history.
 pub async fn bearer_guard(
     State(state): State<ShelfState>,
     req: axum::extract::Request,
     next: Next,
 ) -> Result<Response, ShelfError> {
-    // Prefer Authorization header. Fall back to ?token=... in the
-    // query string because AVFoundation (and any plain <video>/<audio>
-    // src) can't attach custom headers when AVURLAsset / AsyncImage
-    // fetches the file — token-in-URL is the only auth channel for
-    // those clients. ABS itself supports both modes for the same
-    // reason.
-    let header_token = req
-        .headers()
+    let token = header_token(&req).ok_or(ShelfError::Unauthorized)?;
+    authorize(&state, &token)?;
+    Ok(next.run(req).await)
+}
+
+/// Guard for the audio stream route only. Accepts the token in `?token=`
+/// in addition to the header, because AVFoundation (AVURLAsset) and a plain
+/// `<audio>` src can't attach a custom header when fetching the media URL —
+/// token-in-URL is the only auth channel those clients have. Scoped to this
+/// one route so routine API calls don't leak the key into logs.
+pub async fn bearer_guard_stream(
+    State(state): State<ShelfState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Result<Response, ShelfError> {
+    let token = header_token(&req)
+        .or_else(|| query_token(&req))
+        .ok_or(ShelfError::Unauthorized)?;
+    authorize(&state, &token)?;
+    Ok(next.run(req).await)
+}
+
+fn header_token(req: &axum::extract::Request) -> Option<String> {
+    req.headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
-        .map(str::to_string);
-    let query_token = req
-        .uri()
-        .query()
-        .and_then(|q| {
-            url::form_urlencoded::parse(q.as_bytes())
-                .find(|(k, _)| k == "token")
-                .map(|(_, v)| v.into_owned())
-        });
-    let token = header_token
-        .or(query_token)
-        .ok_or(ShelfError::Unauthorized)?;
-    if !constant_time_eq(&token, &state.cfg.api_key) {
-        return Err(ShelfError::Unauthorized);
+        .map(str::to_string)
+}
+
+fn query_token(req: &axum::extract::Request) -> Option<String> {
+    req.uri().query().and_then(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .find(|(k, _)| k == "token")
+            .map(|(_, v)| v.into_owned())
+    })
+}
+
+fn authorize(state: &ShelfState, token: &str) -> Result<(), ShelfError> {
+    if constant_time_eq(token, &state.cfg.api_key) {
+        Ok(())
+    } else {
+        Err(ShelfError::Unauthorized)
     }
-    Ok(next.run(req).await)
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
