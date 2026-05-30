@@ -19,7 +19,7 @@ shim = "shim.__main__:main"
 # project env via `uv run ruff` — previously the hook called a ruff that was
 # never installed, so it failed to spawn on every shim commit.
 [dependency-groups]
-dev = ["ruff>=0.8"]
+dev = ["ruff>=0.15.14"]
 
 [tool.uv]
 package = true
