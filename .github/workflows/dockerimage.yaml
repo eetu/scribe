@@ -109,7 +109,7 @@ jobs:
 
       - name: Build and push backend image
         if: steps.gate.outputs.backend == 'true'
-        uses: docker/build-push-action@v7.1.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           target: runner
@@ -140,7 +140,7 @@ jobs:
 
       - name: Build and push shim image
         if: steps.gate.outputs.shim == 'true'
-        uses: docker/build-push-action@v7.1.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           target: shim-runner
@@ -166,7 +166,7 @@ jobs:
 
       - name: Build and push press image
         if: steps.gate.outputs.press == 'true'
-        uses: docker/build-push-action@v7.1.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           target: press-runner
@@ -192,7 +192,7 @@ jobs:
 
       - name: Build and push shelf image
         if: steps.gate.outputs.shelf == 'true'
-        uses: docker/build-push-action@v7.1.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           target: shelf-runner
