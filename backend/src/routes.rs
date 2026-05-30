@@ -815,10 +815,10 @@ async fn book_cover(
         .and_then(|v| v.to_str().ok())
         == Some(etag.as_str())
     {
-        return Ok(axum::response::Response::builder()
+        return axum::response::Response::builder()
             .status(axum::http::StatusCode::NOT_MODIFIED)
             .body(axum::body::Body::empty())
-            .unwrap());
+            .map_err(|e| AppError::Internal(e.into()));
     }
 
     let bytes = tokio::fs::read(&path)

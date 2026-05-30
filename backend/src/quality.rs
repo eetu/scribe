@@ -28,14 +28,31 @@ pub struct Quality {
     pub channels: u32,
 }
 
+// Big-endian readers over an untrusted m4b atom buffer. Out-of-bounds
+// returns 0 instead of panicking — a malformed/truncated atom must not kill
+// the probe task (it runs in spawn_blocking). 0 is safe here: the box-walk
+// in `find` already special-cases a 0 size, and the metadata parse bails
+// when timescale/duration come back 0.
 fn be_u16(b: &[u8], o: usize) -> u16 {
-    u16::from_be_bytes([b[o], b[o + 1]])
+    o.checked_add(2)
+        .and_then(|end| b.get(o..end))
+        .and_then(|s| <[u8; 2]>::try_from(s).ok())
+        .map(u16::from_be_bytes)
+        .unwrap_or(0)
 }
 fn be_u32(b: &[u8], o: usize) -> u32 {
-    u32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+    o.checked_add(4)
+        .and_then(|end| b.get(o..end))
+        .and_then(|s| <[u8; 4]>::try_from(s).ok())
+        .map(u32::from_be_bytes)
+        .unwrap_or(0)
 }
 fn be_u64(b: &[u8], o: usize) -> u64 {
-    u64::from_be_bytes(b[o..o + 8].try_into().unwrap())
+    o.checked_add(8)
+        .and_then(|end| b.get(o..end))
+        .and_then(|s| <[u8; 8]>::try_from(s).ok())
+        .map(u64::from_be_bytes)
+        .unwrap_or(0)
 }
 
 /// Read just the top-level `moov` box into memory, seeking past `mdat`.
@@ -359,4 +376,27 @@ pub fn spawn_boot_backfill(state: AppState) {
             tracing::info!(probed = done, "quality backfill complete");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{be_u16, be_u32, be_u64};
+
+    #[test]
+    fn be_readers_parse_in_bounds() {
+        let b = [0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02];
+        assert_eq!(be_u16(&b, 0), 1);
+        assert_eq!(be_u32(&b, 4), 2);
+        assert_eq!(be_u64(&b, 0), 0x0001_0000_0000_0002);
+    }
+
+    #[test]
+    fn be_readers_return_zero_out_of_bounds() {
+        // Truncated/malformed atom must not panic the probe task.
+        let b = [0xFFu8; 3];
+        assert_eq!(be_u16(&b, 2), 0); // needs 2..4, only 1 byte left
+        assert_eq!(be_u32(&b, 0), 0); // needs 4, have 3
+        assert_eq!(be_u64(&b, 0), 0);
+        assert_eq!(be_u32(&b, usize::MAX), 0); // checked_add overflow
+    }
 }
