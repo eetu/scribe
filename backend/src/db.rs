@@ -22,7 +22,7 @@ pub struct Db {
 /// can restart mid-edit and advance the version before the matching DDL
 /// is written, but the next boot still converges the schema to match the
 /// code regardless of what the version says.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Timestamp columns migrated from unix-epoch INTEGER to ISO 8601 TEXT
 /// (see `migrate`). Listed here so the one-time conversion stays in sync
@@ -94,6 +94,18 @@ impl Db {
                 ),
                 [],
             )?;
+        }
+
+        // One-shot (v6): builds before this stored MultiPartBook chapters
+        // from the voucher, which returns the coarse part/tree view instead
+        // of the flat per-chapter list. Clear chapters_json once so the
+        // /metadata (Flat) boot backfill repopulates every book correctly.
+        // Gated on the prior user_version so it runs a single time; if it's
+        // ever skipped, `POST /api/library/refresh` forces the same re-fetch.
+        let prev_version: i64 =
+            conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap_or(0);
+        if prev_version < 6 {
+            conn.execute("UPDATE books SET chapters_json = NULL", [])?;
         }
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
