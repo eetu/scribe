@@ -17,41 +17,46 @@ glyph is a closed-book outline with a warm orange dot + audio ripples.
 
 OpenAudible works but is not OSS, opinionated about file layout, and
 ships as a Java/SWT desktop app. scribe runs headless on the home Pi,
-hands the heavy ffmpeg work to a Mac mini worker, integrates with
+hands the ffmpeg work to a small `press` worker, integrates with
 audiobookshelf for playback, and matches the home dashboard family
 visually.
+
+The ffmpeg step is a **lossless remux** (`-c copy` — strip DRM, repackage
+to fragmented M4B), not a re-encode, so it's cheap: `press` can run on a
+separate LAN box for headroom or right on the Pi itself. Where it runs is
+an operational choice, not a hard requirement.
 
 ## Architecture
 
 ```
-┌───────────────────── Pi (raspi) ─────────────────────┐
-│                                                       │
+┌───────────────────── scribe host (e.g. Pi) ──────────┐
+│                                                      │
 │  scribe (Rust, axum, :3003)                          │
 │   ├── React UI (Vite + Emotion + TanStack Router)    │
 │   ├── SQLite (accounts, books, jobs)                 │
 │   ├── OIDC (kanidm) + DEV_AUTH fallback              │
 │   ├── Job orchestrator + polling loop                │
 │   └── NAS writer (two trees: library/ + original/)   │
-│        │                                              │
-│        ▼ loopback HTTP                                │
+│        │                                             │
+│        ▼ loopback HTTP                               │
 │  shim (Python, FastAPI, :3004)                       │
 │   └── wraps mkb79/audible — auth, library, voucher   │
-│                                                       │
+│                                                      │
 │  shelf (Rust, axum, :3006) — optional                │
 │   └── read-only ABS-compatible API over scribe.db    │
 │       for Listen This / other ABS clients            │
-│                                                       │
-└───────────────────────────────────────────────────────┘
+│                                                      │
+└──────────────────────────────────────────────────────┘
                        │ HTTPS + bearer
                        ▼
-┌──────────────── mini (mac, Caddy) ───────────────────┐
-│  scribe-press (Rust, axum, 127.0.0.1:3005)           │
-│   └── ffmpeg subprocess, holds tmp AAXC + M4B,       │
-│       streams both back to Pi on request             │
-└───────────────────────────────────────────────────────┘
+┌──────────── press worker (any LAN host, incl. the Pi) ┐
+│  scribe-press (Rust, axum, :3005)                    │
+│   └── ffmpeg remux (`-c copy`), holds tmp AAXC + M4B,│
+│       streams both back to scribe on request         │
+└──────────────────────────────────────────────────────┘
                        │
                        ▼
-   NAS share (CIFS, mounted on Pi)
+   NAS share (CIFS, mounted on the scribe host)
      ├── library/Author/Title/Title.m4b   ← audiobookshelf reads this
      └── original/Author/Title/Title.aaxc   ← cold original, ABS never sees
 ```
@@ -60,9 +65,10 @@ visually.
 
 ```
 scribe/
-├── Cargo.toml             workspace (backend, press, shared)
+├── Cargo.toml             workspace (backend, press, shared, shelf)
 ├── backend/               Pi-side Rust service (UI + DB + orchestration)
-├── press/                 mini-side Rust worker (ffmpeg)
+├── press/                 Rust ffmpeg worker (runs on any LAN host)
+├── shelf/                 optional read-only ABS-compat API over scribe.db
 ├── shared/                shared types (JobSpec, BookMeta, etc.)
 ├── shim/                  Python sidecar wrapping mkb79/audible
 ├── frontend/              React + Vite + Emotion + TanStack Router
@@ -87,15 +93,16 @@ scribe/
        POST {ABS_URL}/api/libraries/{id}/scan  → audiobookshelf reindexes
 ```
 
-Pi never holds either full file in RAM. Mini holds both briefly on SSD.
+scribe never holds either full file in RAM. The press worker holds both
+briefly on local disk.
 
 ## Quick start
 
 ```sh
-# Pi side
+# scribe core
 cd backend && cargo run
 
-# Mini side
+# press worker (same host or a separate LAN box)
 cd press && cargo run
 
 # Shim
@@ -120,31 +127,35 @@ have surprised redeploys when they were missing.
 
 | Var | Required | Notes |
 |---|---|---|
-| `SCRIBE_BIND` | for reconvert | Must be `0.0.0.0:3003`, not the loopback default. Press on mini fetches `/internal/aaxc/{token}` over the LAN; loopback bind blocks that. Traefik still routes public traffic through 127.0.0.1, which 0.0.0.0 naturally includes. |
-| `SCRIBE_PRESS_URL` | yes | LAN URL of the mini-side press worker (`http://<mini>:3005`). |
-| `SCRIBE_INTERNAL_URL` | for reconvert | LAN URL of *this* scribe instance from press's POV (`http://<raspi-lan-ip>:3003`). Used to mint one-shot `/internal/aaxc/{token}` URLs. Unset = reconvert disabled, downloads still work. |
+| `SCRIBE_BIND` | for remote-press reconvert | Only when press runs on a *separate* host: must be `0.0.0.0:3003`, not the loopback default, so press can fetch `/internal/aaxc/{token}` over the LAN. Co-located press (loopback) doesn't need this. |
+| `SCRIBE_PRESS_URL` | yes | URL of the press worker — `http://127.0.0.1:3005` if co-located, `http://<press-host>:3005` if on another LAN box. |
+| `SCRIBE_INTERNAL_URL` | for remote-press reconvert | LAN URL of *this* scribe instance from press's POV (`http://<scribe-lan-ip>:3003`). Used to mint one-shot `/internal/aaxc/{token}` URLs. Unset = reconvert disabled, downloads still work. Not needed when press is co-located. |
 | `SCRIBE_LIBRARY_DIR` | yes | Canonical M4B output root. ABS scans this. |
 | `SCRIBE_ORIGINAL_DIR` | yes | Encrypted AAXC + sidecar JSON tree. ABS does **not** scan this. |
 | `SCRIBE_AUTO_ENQUEUE` | optional | `1` auto-queues new purchases on poll; `0` is manual-only. |
-| `OIDC_*` | for kanidm | Discovery + client secret + redirect URL. `DEV_AUTH=1` short-circuits for local. |
+| `OIDC_*` | for kanidm | Discovery + client secret + redirect URL. `DEV_AUTH=1` short-circuits for local. OIDC discovery is lazy + self-heals (kanidm can boot after scribe); `/status` reports `oidc_configured` + `oidc_ready`. |
+| `SESSION_KEY` | required if `DEV_AUTH=0` | 64-byte hex (`openssl rand -hex 64`). Signs the session cookie; backend **refuses to boot** without it in prod (a predictable key would let anyone forge a session). Under `DEV_AUTH=1` a random per-boot key is used and sessions drop on restart. |
 
 `secret_env`:
 
-- `SCRIBE_PRESS_TOKEN` — bearer shared with mini's `scribe-press` (`api_key` field).
+- `SCRIBE_PRESS_TOKEN` — bearer shared with the `scribe-press` worker (`api_key` field).
 - `ABS_TOKEN` — audiobookshelf API token, lets scribe trigger a rescan after each job.
 
 ### Firewall
 
-UFW on the Pi defaults to deny incoming. Reconvert requires the mini to reach
-scribe directly on port 3003 (the `/internal/aaxc/{token}` route). Open it
-scoped to the mini IP:
+Only relevant when press runs on a **separate host**. If press is co-located
+with scribe it talks over loopback and no hole is needed.
+
+UFW on the scribe host defaults to deny incoming. Remote-press reconvert
+requires the press host to reach scribe directly on port 3003 (the
+`/internal/aaxc/{token}` route). Open it scoped to the press host IP:
 
 ```sh
-sudo ufw allow from <mini-lan-ip> to any port 3003 proto tcp comment 'scribe reconvert from mini'
+sudo ufw allow from <press-host-ip> to any port 3003 proto tcp comment 'scribe reconvert from press'
 ```
 
-The Pi-side `tasks/hardening.py` doesn't ship this rule yet — add it there
-when you fold mini → raspi into the IaC checklist.
+The `tasks/hardening.py` IaC doesn't ship this rule yet — add it there when
+you fold the press host into the checklist.
 
 ### NAS layout
 
@@ -165,12 +176,14 @@ page flips the chip to `missing` and surfaces a `re-convert` button:
 
 1. Backend mints a one-shot token, registers `(token → aaxc_path)`.
 2. Submits a normal press job with `content_url = ${SCRIBE_INTERNAL_URL}/internal/aaxc/<token>`.
-3. Press fetches the AAXC over LAN like any CDN URL, runs ffmpeg, stages M4B.
+3. Press fetches the AAXC like any other `content_url`, runs ffmpeg, stages M4B.
 4. Backend streams the M4B back into the canonical path, atomic-renames `.partial → final`, revokes the token.
 
 The flow has no extra press-side dependency — press treats the scribe URL as
-just another `content_url`. The only deployment-side requirements are the
-`SCRIBE_BIND`, `SCRIBE_INTERNAL_URL`, and UFW rule above.
+just another `content_url`. When press is co-located with scribe this is
+loopback and needs no extra config; when press is on a separate host the
+only deployment requirements are `SCRIBE_BIND`, `SCRIBE_INTERNAL_URL`, and
+the UFW rule above.
 
 ## Shelf — external ABS-compatible read API
 

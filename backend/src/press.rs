@@ -1,4 +1,4 @@
-//! HTTP client for scribe-press (mini worker) + NAS streaming sink + ABS notify.
+//! HTTP client for scribe-press (ffmpeg worker) + NAS streaming sink + ABS notify.
 //!
 //! The Pi never holds either the AAXC or the M4B fully in RAM: each artifact
 //! is fetched as a streaming response and piped straight into the NAS file via
@@ -97,7 +97,8 @@ impl<'a> PressClient<'a> {
         };
         // /health is anonymous by convention. Press exempts it from its
         // own bearer guard, and any reverse proxy in front of press is
-        // expected to do the same (see mini/tasks/caddy.py site_block).
+        // expected to do the same (see the press host's proxy site_block
+        // in the deploy IaC).
         let r = self
             .state
             .http
