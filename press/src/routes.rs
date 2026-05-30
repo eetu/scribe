@@ -42,6 +42,15 @@ async fn create_job(
     if let Err(msg) = req.drm.validate() {
         return Err((StatusCode::BAD_REQUEST, msg.into()));
     }
+    // `file://` reads an arbitrary local path back through /jobs/{id}/aaxc —
+    // gated behind an explicit opt-in so it can't be abused in prod (the
+    // normal pipeline never sends it).
+    if req.content_url.starts_with("file://") && !state.cfg.allow_file_url {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "file:// content_url is disabled (set PRESS_ALLOW_FILE_URL=1 for local testing)".into(),
+        ));
+    }
     let s = state
         .jobs
         .create(req)

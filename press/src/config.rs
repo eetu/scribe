@@ -10,6 +10,14 @@ pub struct Config {
     pub tmp_dir: PathBuf,
     pub max_jobs: usize,
     pub ffmpeg_bin: String,
+    /// Allow `file://` content_urls. Off by default: a `file://` job copies
+    /// an arbitrary local path into the job dir and exposes it via
+    /// `GET /jobs/{id}/aaxc`, i.e. an arbitrary-local-file-read primitive for
+    /// any holder of the bearer token. The normal pipeline never sends
+    /// `file://` (reconvert uses an `http://…/internal/aaxc/<token>` URL), so
+    /// this stays off in prod; flip it on only for local OpenAudible-import
+    /// testing.
+    pub allow_file_url: bool,
 }
 
 impl Config {
@@ -33,6 +41,9 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(2),
             ffmpeg_bin: env::var("FFMPEG_BIN").unwrap_or_else(|_| "ffmpeg".into()),
+            allow_file_url: env::var("PRESS_ALLOW_FILE_URL")
+                .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
         })
     }
 }
