@@ -1,6 +1,6 @@
 # shim API contract (draft, task #1)
 
-Python FastAPI sidecar wrapping `mkb79/audible` (≥ Jan 2026 release). Loopback `127.0.0.1:3004`. JSON in/out. No auth on the sidecar itself — only the Pi loopback can reach it. The Rust app caller is trusted.
+Python FastAPI sidecar wrapping `mkb79/audible` (≥ Jan 2026 release). Loopback `127.0.0.1:3004`. JSON in/out. The Pi loopback bind is the primary access control. Optionally, setting `SHIM_TOKEN` requires `Authorization: Bearer <token>` on every request except `/health` (returns 401 otherwise) — defense-in-depth for the Audible-credential endpoints. The Rust app caller is trusted and sends the token via `SCRIBE_SHIM_TOKEN`.
 
 All Audible-side state (tokens, RSA private key, cookies) lives in encrypted files on disk under `/var/lib/shim/accounts/`. Passphrase from `/etc/secrets/shim.env`.
 

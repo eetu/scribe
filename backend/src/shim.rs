@@ -126,37 +126,43 @@ impl<'a> ShimClient<'a> {
         format!("{}{}", self.state.cfg.shim_url.trim_end_matches('/'), path)
     }
 
+    /// Attach the shared-secret bearer when `SCRIBE_SHIM_TOKEN` is set. The
+    /// shim is loopback-only by default; this is belt-and-suspenders for a
+    /// firewall slip or a sidecar escape (the shim holds Audible creds).
+    fn auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self.state.cfg.shim_token.as_deref() {
+            Some(t) => rb.bearer_auth(t),
+            None => rb,
+        }
+    }
+
+    fn get(&self, path: &str) -> reqwest::RequestBuilder {
+        self.auth(self.state.http.get(self.url(path)))
+    }
+
+    fn post(&self, path: &str) -> reqwest::RequestBuilder {
+        self.auth(self.state.http.post(self.url(path)))
+    }
+
     pub async fn health(&self) -> bool {
         matches!(
-            self.state.http.get(self.url("/health")).send().await,
+            self.get("/health").send().await,
             Ok(r) if r.status().is_success()
         )
     }
 
     pub async fn list_accounts(&self) -> Result<Vec<AccountSummary>, AppError> {
-        let r = self.state.http.get(self.url("/accounts")).send().await?;
+        let r = self.get("/accounts").send().await?;
         Ok(r.error_for_status()?.json().await?)
     }
 
     pub async fn login_start(&self, req: LoginStartReq<'_>) -> Result<LoginStartResp, AppError> {
-        let r = self
-            .state
-            .http
-            .post(self.url("/login/start"))
-            .json(&req)
-            .send()
-            .await?;
+        let r = self.post("/login/start").json(&req).send().await?;
         Ok(r.error_for_status()?.json().await?)
     }
 
     pub async fn login_finish(&self, req: LoginFinishReq<'_>) -> Result<LoginFinishResp, AppError> {
-        let r = self
-            .state
-            .http
-            .post(self.url("/login/finish"))
-            .json(&req)
-            .send()
-            .await?;
+        let r = self.post("/login/finish").json(&req).send().await?;
         Ok(r.error_for_status()?.json().await?)
     }
 
@@ -168,9 +174,7 @@ impl<'a> ShimClient<'a> {
         status: Option<&str>,
     ) -> Result<LibraryPage, AppError> {
         let mut req = self
-            .state
-            .http
-            .get(self.url(&format!("/accounts/{account_id}/library")))
+            .get(&format!("/accounts/{account_id}/library"))
             .query(&[("page", page), ("num_results", num_results)]);
         if let Some(s) = status {
             req = req.query(&[("status", s)]);
@@ -180,9 +184,7 @@ impl<'a> ShimClient<'a> {
 
     pub async fn voucher(&self, account_id: &str, asin: &str) -> Result<VoucherResp, AppError> {
         let r = self
-            .state
-            .http
-            .get(self.url(&format!("/accounts/{account_id}/books/{asin}/voucher")))
+            .get(&format!("/accounts/{account_id}/books/{asin}/voucher"))
             .send()
             .await?;
         // 410 = Audible refused to license this ASIN to this customer
@@ -204,9 +206,7 @@ impl<'a> ShimClient<'a> {
     /// license), so it's the chapter backfill source for older rescues.
     pub async fn metadata(&self, account_id: &str, asin: &str) -> Result<MetadataResp, AppError> {
         let r = self
-            .state
-            .http
-            .get(self.url(&format!("/accounts/{account_id}/books/{asin}/metadata")))
+            .get(&format!("/accounts/{account_id}/books/{asin}/metadata"))
             .send()
             .await?;
         Ok(r.error_for_status()?.json().await?)

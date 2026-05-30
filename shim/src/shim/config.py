@@ -13,6 +13,16 @@ def accounts_dir() -> Path:
     return p
 
 
+def token() -> str | None:
+    """Optional shared-secret bearer. When set, every request except
+    `/health` must carry `Authorization: Bearer <token>`. Unset = the shim
+    trusts its loopback binding alone (a warning is logged at startup).
+    Defense-in-depth for a firewall slip / sidecar escape, since the shim
+    holds Audible credentials.
+    """
+    return os.environ.get("SHIM_TOKEN") or None
+
+
 def passphrase() -> str:
     """Passphrase used to encrypt the on-disk auth files.
 
