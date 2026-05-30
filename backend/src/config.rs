@@ -103,13 +103,18 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(50),
+            // Clamp to a valid clock hour (0–23). `% 24` keeps a stray value
+            // sane and maps "24" → 0 (midnight), so an end of 24 reads as
+            // "through midnight" rather than silently disabling the window.
             poll_active_hour_start: env::var("SCRIBE_POLL_ACTIVE_HOUR_START")
                 .ok()
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<u32>().ok())
+                .map(|h| h % 24)
                 .unwrap_or(7),
             poll_active_hour_end: env::var("SCRIBE_POLL_ACTIVE_HOUR_END")
                 .ok()
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<u32>().ok())
+                .map(|h| h % 24)
                 .unwrap_or(23),
             job_concurrency: env::var("SCRIBE_JOB_CONCURRENCY")
                 .ok()

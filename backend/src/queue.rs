@@ -276,40 +276,58 @@ impl Queue {
 
     /// Re-queue any non-terminal jobs after a restart. Call once at boot,
     /// after state is constructed and workers are spawned.
+    ///
+    /// A normal download job only gets `aaxc_path` set when it reaches the
+    /// terminal `done` state, so a *non-terminal* job that already has an
+    /// `aaxc_path` is an interrupted **reconvert** (it operates on a
+    /// previously-downloaded source). Re-queuing those through the worker
+    /// would run a full CDN download via `pipeline::run` — wrong, and it
+    /// fails outright for a since-revoked title that reconvert-from-local
+    /// could still rebuild. So fail them with a clear message instead; the
+    /// library page keeps the `re-convert` button for a manual retry.
     pub async fn resume_pending(&self) -> Result<(), AppError> {
-        let rows = self
+        let rows: Vec<(String, Option<String>)> = self
             .inner
             .state
             .db
             .with(|c| {
                 let mut stmt = c.prepare(
-                    "SELECT id FROM jobs
+                    "SELECT id, aaxc_path FROM jobs
                      WHERE status NOT IN ('done', 'failed', 'cancelled')",
                 )?;
                 let v = stmt
-                    .query_map([], |r| r.get::<_, String>(0))?
+                    .query_map([], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                    })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok(v)
             })
             .await?;
-        for raw in rows {
-            if let Ok(id) = Uuid::parse_str(&raw) {
-                let now = Utc::now().timestamp();
-                let id_s = id.to_string();
+        for (raw, aaxc_path) in rows {
+            let Ok(id) = Uuid::parse_str(&raw) else { continue };
+            if aaxc_path.is_some() {
                 self.inner
-                    .state
-                    .db
-                    .with(move |c| {
-                        c.execute(
-                            "UPDATE jobs SET status='queued', updated_at=?1 WHERE id=?2",
-                            rusqlite::params![now, id_s],
-                        )?;
-                        Ok(())
-                    })
-                    .await?;
-                let _ = self.inner.work_tx.send(id).await;
-                tracing::info!(%id, "resumed pending job");
+                    .save_failure(id, "reconvert interrupted by restart — retry from the library")
+                    .await
+                    .ok();
+                tracing::info!(%id, "failed interrupted reconvert on resume");
+                continue;
             }
+            let now = Utc::now().timestamp();
+            let id_s = id.to_string();
+            self.inner
+                .state
+                .db
+                .with(move |c| {
+                    c.execute(
+                        "UPDATE jobs SET status='queued', updated_at=?1 WHERE id=?2",
+                        rusqlite::params![now, id_s],
+                    )?;
+                    Ok(())
+                })
+                .await?;
+            let _ = self.inner.work_tx.send(id).await;
+            tracing::info!(%id, "resumed pending job");
         }
         Ok(())
     }
@@ -330,6 +348,17 @@ impl Inner {
             .entry(job_id)
             .or_insert_with(|| Arc::new(std::sync::atomic::AtomicBool::new(false)));
         flag.clone()
+    }
+
+    /// Drop a job's in-memory bookkeeping once it reaches a terminal state.
+    /// Both maps are keyed by job UUID and were never cleaned up, so over a
+    /// long-running process (continuous polling + conversions) they grew
+    /// without bound — a slow leak that matters on the 1 GB Pi. Call after
+    /// the final event is broadcast; existing SSE receivers drain the
+    /// buffered terminal event and then see the channel close.
+    async fn evict(&self, job_id: Uuid) {
+        self.channels.lock().await.remove(&job_id);
+        self.cancel_flags.lock().await.remove(&job_id);
     }
 
     pub(crate) async fn set_phase(&self, job_id: Uuid, phase: Lifecycle, retry_count: u32) -> Result<(), AppError> {
@@ -392,6 +421,7 @@ impl Inner {
             m4b_path: m4b.to_string(),
             aaxc_path: aaxc.to_string(),
         });
+        self.evict(job_id).await;
         Ok(())
     }
 
@@ -411,6 +441,7 @@ impl Inner {
             .await?;
         let tx = self.channel(job_id).await;
         let _ = tx.send(QueueEvent::Failed { message: msg.to_string() });
+        self.evict(job_id).await;
         Ok(())
     }
 
@@ -430,6 +461,7 @@ impl Inner {
             .await;
         let tx = self.channel(job_id).await;
         let _ = tx.send(QueueEvent::Cancelled);
+        self.evict(job_id).await;
     }
 
     async fn run_job(self: &Arc<Self>, job_id: Uuid) -> Result<(), AppError> {
@@ -473,7 +505,12 @@ impl Inner {
                 }
                 Err(e) => {
                     let transient = matches!(&e, AppError::Upstream(_) | AppError::Internal(_));
-                    if transient && attempt + 1 < max_retries {
+                    // `attempt` is the 0-based try index; `max_retries` is the
+                    // number of *retries* allowed (SCRIBE_JOB_RETRY_MAX). So
+                    // retry while attempt < max_retries — `attempt < N` yields
+                    // N retries (N+1 total tries). The old `attempt + 1 < N`
+                    // silently did one fewer (and 0 retries for N==1).
+                    if transient && attempt < max_retries {
                         attempt += 1;
                         let backoff = Duration::from_secs((1u64 << attempt.min(5)) * 5);
                         tracing::warn!(

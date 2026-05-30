@@ -64,6 +64,23 @@ async fn run(state: AppState) {
     }
 }
 
+/// Is `hour` (0–23) inside the active polling window `[start, end)`?
+///
+/// - `start < end`  → normal same-day window, e.g. 7..23.
+/// - `start > end`  → wraps midnight, e.g. 22..6.
+/// - `start == end` → no quiet hours: active 24/7. (The old `start <= end`
+///   branch made an equal pair `hour >= s && hour < s`, i.e. *never* active,
+///   silently collapsing a "24h" config to one poll a day.)
+fn in_active_window(hour: u32, start: u32, end: u32) -> bool {
+    if start == end {
+        true
+    } else if start < end {
+        hour >= start && hour < end
+    } else {
+        hour >= start || hour < end
+    }
+}
+
 /// Inside active hours: base interval + uniform jitter in ±jitter_percent.
 /// Outside: sleep until the next active-hour-start, ±30min jitter.
 fn next_sleep(state: &AppState) -> Duration {
@@ -72,11 +89,7 @@ fn next_sleep(state: &AppState) -> Duration {
     let start = state.cfg.poll_active_hour_start;
     let end = state.cfg.poll_active_hour_end;
 
-    let in_window = if start <= end {
-        hour >= start && hour < end
-    } else {
-        hour >= start || hour < end
-    };
+    let in_window = in_active_window(hour, start, end);
 
     if !in_window {
         let cur_min = now.hour() * 60 + now.minute();
@@ -254,4 +267,39 @@ async fn list_accounts_with_profile(state: &AppState) -> anyhow::Result<Vec<(Str
         })
         .await?;
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_active_window;
+
+    #[test]
+    fn normal_window_excludes_end_hour() {
+        // 07:00–23:00: active 7..=22, quiet at 23 and before 7.
+        assert!(!in_active_window(6, 7, 23));
+        assert!(in_active_window(7, 7, 23));
+        assert!(in_active_window(22, 7, 23));
+        assert!(!in_active_window(23, 7, 23));
+        assert!(!in_active_window(0, 7, 23));
+    }
+
+    #[test]
+    fn wrapping_window_spans_midnight() {
+        // 22:00–06:00.
+        assert!(in_active_window(22, 22, 6));
+        assert!(in_active_window(23, 22, 6));
+        assert!(in_active_window(0, 22, 6));
+        assert!(in_active_window(5, 22, 6));
+        assert!(!in_active_window(6, 22, 6));
+        assert!(!in_active_window(12, 22, 6));
+    }
+
+    #[test]
+    fn equal_start_end_is_always_active() {
+        // start == end → 24/7, no quiet hours (regression: used to be never).
+        for h in 0..24 {
+            assert!(in_active_window(h, 0, 0), "hour {h} should be active");
+            assert!(in_active_window(h, 9, 9), "hour {h} should be active");
+        }
+    }
 }
