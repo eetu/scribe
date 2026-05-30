@@ -56,10 +56,21 @@ const accountsFetcher = () => api.accounts();
 const jobsFetcher = () => api.jobs();
 const meFetcher = () => api.me();
 
+// Run an action, surfacing any failure instead of swallowing it — without a
+// catch a 401/503/timeout left the button enabled and the user re-clicking
+// into the void. lowercase + no "!" per the house voice.
+function guard(action: string, fn: () => Promise<void>): Promise<void> {
+  return fn().catch((e) => alert(`${action} failed — ${String(e)}`));
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 function LibraryPage() {
   const theme = useTheme();
-  const { data, isLoading } = useSWR("/api/library", fetcher);
+  // Poll on the same 5s cadence as jobs so a background convert completing
+  // flips the book's status live, instead of going stale until reload.
+  const { data, isLoading } = useSWR("/api/library", fetcher, {
+    refreshInterval: 5000,
+  });
   const { data: accounts } = useSWR("/api/accounts", accountsFetcher);
   const { data: jobs } = useSWR("/api/jobs", jobsFetcher, {
     refreshInterval: 5000,
@@ -319,18 +330,20 @@ function LibraryPage() {
         </h2>
         <div css={{ display: "flex", gap: 8 }}>
           <button
-            onClick={async () => {
+            onClick={() => {
               if (
                 !confirm(
                   "Queue downloads for every Active book that isn't already in jobs?",
                 )
               )
                 return;
-              const r = await api.enqueueAll({});
-              mutate("/api/jobs");
-              alert(
-                `queued ${r.queued} new job(s) across ${r.accounts} account(s)`,
-              );
+              void guard("download all", async () => {
+                const r = await api.enqueueAll({});
+                mutate("/api/jobs");
+                alert(
+                  `queued ${r.queued} new job(s) across ${r.accounts} account(s)`,
+                );
+              });
             }}
             css={chipButton(theme)}
           >
@@ -343,6 +356,9 @@ function LibraryPage() {
                 // Full refresh: re-syncs metadata, then re-caches covers
                 // and re-probes quality in the background on the Pi.
                 await api.refreshLibrary();
+              } catch (e) {
+                alert(`refresh failed — ${String(e)}`);
+                return; // finally still clears the spinner
               } finally {
                 setSyncing(false);
               }
@@ -450,34 +466,47 @@ function LibraryPage() {
             coverBust={coverBust[b.asin]}
             onRefresh={
               buckets.get(b.asin) === "done"
-                ? async () => {
-                    await api.refreshBook(b.asin);
-                    setCoverBust((prev) => ({ ...prev, [b.asin]: Date.now() }));
-                    mutate("/api/library");
-                    mutate("/api/jobs");
-                  }
+                ? () =>
+                    guard("refresh", async () => {
+                      await api.refreshBook(b.asin);
+                      setCoverBust((prev) => ({
+                        ...prev,
+                        [b.asin]: Date.now(),
+                      }));
+                      mutate("/api/library");
+                      mutate("/api/jobs");
+                    })
                 : undefined
             }
-            onDownload={async () => {
-              await api.enqueueJob({ account_id: b.account_id, asin: b.asin });
-              mutate("/api/jobs");
-            }}
-            onReconvert={async () => {
-              const j = jobByAsin.get(b.asin);
-              if (!j) return;
-              await api.reconvertJob(j.id);
-              mutate("/api/jobs");
-            }}
-            onRemove={async () => {
+            onDownload={() =>
+              guard("download", async () => {
+                await api.enqueueJob({
+                  account_id: b.account_id,
+                  asin: b.asin,
+                });
+                mutate("/api/jobs");
+              })
+            }
+            onReconvert={() =>
+              guard("reconvert", async () => {
+                const j = jobByAsin.get(b.asin);
+                if (!j) return;
+                await api.reconvertJob(j.id);
+                mutate("/api/jobs");
+              })
+            }
+            onRemove={() => {
               if (
                 !confirm(
                   `remove "${b.title}" from scribe?\n\nthe library and source files stay on disk — only scribe's record is removed. it won't come back unless you re-buy it on audible.`,
                 )
               )
                 return;
-              await api.removeBook(b.asin);
-              mutate("/api/library");
-              mutate("/api/jobs");
+              void guard("remove", async () => {
+                await api.removeBook(b.asin);
+                mutate("/api/library");
+                mutate("/api/jobs");
+              });
             }}
           />
         ))}

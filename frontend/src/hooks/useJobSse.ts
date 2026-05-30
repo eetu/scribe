@@ -30,37 +30,61 @@ export function useJobSse(jobId: string | null): JobLive {
 
   useEffect(() => {
     if (!jobId) return;
-    const es = new EventSource(`/api/jobs/${jobId}/sse`);
-    es.onmessage = (e) => {
-      try {
-        const ev = JSON.parse(e.data) as JobSseEvent;
-        setLive((prev) => {
+    let es: EventSource | null = null;
+    let cancelled = false; // unmount / jobId change
+    let terminal = false; // job reached done/failed/cancelled
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const connect = () => {
+      es = new EventSource(`/api/jobs/${jobId}/sse`);
+      es.onmessage = (e) => {
+        attempt = 0; // a healthy frame resets the backoff
+        try {
+          const ev = JSON.parse(e.data) as JobSseEvent;
           if (ev.kind === "progress") {
-            return { ...prev, progress: ev };
+            setLive((prev) => ({ ...prev, progress: ev }));
+            return;
           }
           // Queue Phase events are coarse ("downloading" covers the whole
           // press round-trip including ffmpeg). Press Progress events are
-          // fine-grained ("downloading" → "converting"). They live on
-          // independent dimensions — don't let a Phase event clobber the
-          // Progress phase. Only terminal events drop progress so a
-          // completed job's stale counter doesn't linger.
+          // fine-grained. Independent dimensions — a Phase event must not
+          // clobber the Progress phase. Only terminal events drop progress.
           const isTerminal =
             ev.kind === "done" ||
             ev.kind === "failed" ||
             ev.kind === "cancelled";
-          return {
+          if (isTerminal) {
+            terminal = true;
+            es?.close();
+          }
+          setLive((prev) => ({
             status: ev,
             progress: isTerminal ? null : prev.progress,
-          };
-        });
-      } catch {
-        // ignore malformed frames; the next one will arrive shortly.
-      }
+          }));
+        } catch {
+          // ignore malformed frames; the next one will arrive shortly.
+        }
+      };
+      es.onerror = () => {
+        // A network blip closes the stream; EventSource won't resume after a
+        // manual close, so reconnect with capped exponential backoff. Stop
+        // once terminal (channel is evicted server-side) or unmounted. The
+        // 5s /api/jobs poll resyncs the final state if we gave up mid-flight.
+        es?.close();
+        if (cancelled || terminal || attempt >= 6) return;
+        const delay = Math.min(1000 * 2 ** attempt, 15000);
+        attempt += 1;
+        timer = setTimeout(connect, delay);
+      };
     };
-    es.onerror = () => {
-      es.close();
+    connect();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      es?.close();
     };
-    return () => es.close();
   }, [jobId]);
 
   return live;
