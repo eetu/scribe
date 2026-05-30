@@ -1,0 +1,17 @@
+[package]
+name = "scribe-e2e"
+edition = { workspace = true }
+version = { workspace = true }
+publish = false
+
+# Test-only crate: a harness that boots the whole stack on loopback, plus
+# integration tests under tests/. No library API is shipped; the harness
+# lives in src/lib.rs only so the tests can share it.
+
+[dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+# Needs the cookie store for the DEV_AUTH session flow, which the workspace
+# reqwest feature set doesn't enable — declare our own here.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies"] }

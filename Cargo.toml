@@ -5,6 +5,7 @@ members = [
     "press",
     "shared",
     "shelf",
+    "e2e",
 ]
 
 [workspace.package]
@@ -37,3 +38,4 @@ base64 = "0.22"
 dotenvy = "0.15"
 rand = "0.9"
 openidconnect = "4"
+tempfile = "3"
