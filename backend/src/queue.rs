@@ -399,6 +399,11 @@ impl Inner {
     }
 
     pub(crate) async fn save_outcome_done(&self, job_id: Uuid, aaxc: &str, m4b: &str) -> Result<(), AppError> {
+        // INVARIANT: `aaxc_path` is only ever written here, at the terminal
+        // `done` transition. `resume_pending` relies on that — a non-terminal
+        // job that already has `aaxc_path` is treated as an interrupted
+        // reconvert, not a fresh download. Do NOT set `aaxc_path` on a
+        // non-terminal row elsewhere, or restart-resume will misclassify it.
         let id_s = job_id.to_string();
         let aaxc_s = aaxc.to_string();
         let m4b_s = m4b.to_string();
@@ -543,5 +548,26 @@ async fn wait_for_cancel(flag: &Arc<std::sync::atomic::AtomicBool>) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Lifecycle;
+
+    #[test]
+    fn lifecycle_strings_are_stable() {
+        // These exact strings are persisted in the jobs.status column and
+        // hardcoded in SQL literals throughout this module. A rename here is
+        // a breaking change — this test is the canary that the enum and the
+        // on-disk/SQL vocabulary stay in lockstep.
+        assert_eq!(Lifecycle::Queued.as_str(), "queued");
+        assert_eq!(Lifecycle::FetchingVoucher.as_str(), "fetching_voucher");
+        assert_eq!(Lifecycle::Downloading.as_str(), "downloading");
+        assert_eq!(Lifecycle::Converting.as_str(), "converting");
+        assert_eq!(Lifecycle::Streaming.as_str(), "streaming");
+        assert_eq!(Lifecycle::Done.as_str(), "done");
+        assert_eq!(Lifecycle::Failed.as_str(), "failed");
+        assert_eq!(Lifecycle::Cancelled.as_str(), "cancelled");
     }
 }

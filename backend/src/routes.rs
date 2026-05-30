@@ -267,7 +267,9 @@ async fn login_start(
             with_username: body.with_username,
         })
         .await?;
-    Ok(Json(serde_json::to_value(resp).unwrap()))
+    Ok(Json(
+        serde_json::to_value(resp).map_err(|e| AppError::Internal(e.into()))?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,7 +358,9 @@ async fn login_finish(
         }
     });
 
-    Ok(Json(serde_json::to_value(resp).unwrap()))
+    Ok(Json(
+        serde_json::to_value(resp).map_err(|e| AppError::Internal(e.into()))?,
+    ))
 }
 
 // ---------- library + jobs (DB-backed) ----------

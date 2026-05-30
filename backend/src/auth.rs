@@ -264,3 +264,36 @@ pub async fn logout(jar: SignedCookieJar) -> Response {
         .build();
     (jar.remove(cookie), StatusCode::NO_CONTENT).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_cookie, sanitize_next};
+
+    #[test]
+    fn sanitize_next_allows_internal_paths() {
+        assert_eq!(sanitize_next(Some("/jobs")), "/jobs");
+        assert_eq!(sanitize_next(Some("/accounts?x=1")), "/accounts?x=1");
+    }
+
+    #[test]
+    fn sanitize_next_blocks_open_redirect() {
+        // schemeless external (`//host`), absolute external, and anything
+        // not starting with `/` all fall back to the app root.
+        assert_eq!(sanitize_next(Some("//evil.com")), "/");
+        assert_eq!(sanitize_next(Some("https://evil.com")), "/");
+        assert_eq!(sanitize_next(Some("evil")), "/");
+        assert_eq!(sanitize_next(None), "/");
+    }
+
+    #[test]
+    fn parse_cookie_splits_sub_and_email() {
+        assert_eq!(parse_cookie("abc|a@b"), Some(("abc", "a@b")));
+    }
+
+    #[test]
+    fn parse_cookie_rejects_malformed() {
+        assert_eq!(parse_cookie("noseparator"), None);
+        assert_eq!(parse_cookie("|a@b"), None); // empty sub
+        assert_eq!(parse_cookie("abc|"), None); // empty email
+    }
+}
