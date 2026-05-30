@@ -64,16 +64,34 @@ async fn create_job(
     tokio::spawn(async move {
         let _permit = match sem.acquire_owned().await {
             Ok(p) => p,
-            Err(_) => return,
+            Err(_) => {
+                // Semaphore closed (shutdown). Mark the job Failed so the
+                // backend's poll sees a terminal state instead of waiting
+                // forever on a job that will never run.
+                let mut g = s.lock().await;
+                g.phase = Phase::Failed;
+                g.error.get_or_insert_with(|| "worker unavailable".to_string());
+                let _ = g
+                    .events
+                    .send(JobEvent::Failed { message: "worker unavailable".into() });
+                return;
+            }
         };
         if let Err(e) = ffmpeg::run(s.clone(), ffmpeg_bin).await {
             tracing::error!(%job_id, error = %e, "job failed");
-            let mut g = s.lock().await;
-            g.phase = Phase::Failed;
-            if g.error.is_none() {
-                g.error = Some(e.to_string());
-            }
-            let _ = g.events.send(JobEvent::Failed { message: e.to_string() });
+            let dir = {
+                let mut g = s.lock().await;
+                g.phase = Phase::Failed;
+                if g.error.is_none() {
+                    g.error = Some(e.to_string());
+                }
+                let _ = g.events.send(JobEvent::Failed { message: e.to_string() });
+                g.dir.clone()
+            };
+            // Purge scratch now (raw.aaxc + any partial out.m4b) instead of
+            // waiting for the 24h sweep — a failing backlog otherwise piles
+            // up GB. The job stays in the map (Failed) for status/SSE.
+            jobs::purge_dir(&dir).await;
         }
     });
 

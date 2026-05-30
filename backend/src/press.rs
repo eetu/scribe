@@ -16,6 +16,25 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::state::AppState;
 
+/// Removes a `.partial` file on drop unless disarmed. Ensures every error
+/// path in `stream_to_file` (network drop, disk-full, failed rename) cleans
+/// up the half-written file instead of leaking it on the NAS.
+struct PartialCleanup<'a>(Option<&'a Path>);
+
+impl PartialCleanup<'_> {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for PartialCleanup<'_> {
+    fn drop(&mut self) {
+        if let Some(p) = self.0 {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "drm", rename_all = "snake_case")]
 pub enum PressDrm {
@@ -171,6 +190,11 @@ impl<'a> PressClient<'a> {
             p.push(".partial");
             std::path::PathBuf::from(p)
         };
+        // Remove the .partial on any early-return error (stream drop,
+        // disk-full, failed rename) so a botched write doesn't leak GB on
+        // the NAS across retries. Disarmed once the rename succeeds. The
+        // guard is declared before `file` so the file handle closes first.
+        let mut partial_guard = PartialCleanup(Some(partial.as_path()));
         let mut file = tokio::fs::File::create(&partial)
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
@@ -214,6 +238,7 @@ impl<'a> PressClient<'a> {
         tokio::fs::rename(&partial, dest)
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+        partial_guard.disarm(); // renamed into place — nothing to clean up
         if let Some((tx, phase)) = progress {
             let _ = tx.send(crate::queue::QueueEvent::Progress {
                 phase: phase.to_string(),
