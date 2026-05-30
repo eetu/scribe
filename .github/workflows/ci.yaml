@@ -59,3 +59,27 @@ jobs:
       # before reaching the deploy step. Routes are exercised against
       # real Audible in the periodic smoke test, not here.
       - run: SHIM_DEV=1 uv run python -c "from shim.main import app; assert len(app.routes) > 5"
+
+  e2e:
+    name: "E2E smoke (stack boots + talks)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      # The harness (scribe-e2e) boots backend + shim + press + shelf with
+      # DEV_AUTH and temp dirs, then probes the cross-service wiring: the
+      # /status health fan-out, the DEV_AUTH session flow, and each sidecar's
+      # auth boundary. No Audible credentials or DRM material — guards stack
+      # integrity, not the download/convert path. The test is #[ignore] so
+      # the backend job's `cargo test --workspace` skips it; here we build the
+      # service binaries first, then run it explicitly.
+      - run: uv sync --frozen
+        working-directory: shim
+      - run: cargo build -p scribe-backend -p scribe-press -p scribe-shelf
+      - run: cargo test -p scribe-e2e -- --ignored --nocapture
