@@ -68,7 +68,8 @@ async fn walk(state: &AppState, account_id: &str, limit: Option<u64>) -> Result<
         page += 1;
     }
 
-    let now = Utc::now().timestamp();
+    let now_ts = Utc::now().timestamp(); // in-memory report field (unix)
+    let now = crate::util::now_iso(); // ISO for the last_synced_at column
     let acct = account_id.to_string();
     state
         .db
@@ -80,7 +81,7 @@ async fn walk(state: &AppState, account_id: &str, limit: Option<u64>) -> Result<
             Ok(())
         })
         .await?;
-    report.finished_at_unix = now;
+    report.finished_at_unix = now_ts;
     tracing::info!(
         account = %report.account_id,
         seen = report.seen,
@@ -112,7 +113,7 @@ async fn upsert(state: &AppState, account_id: &str, book: &LibraryBook) -> Resul
         .as_deref()
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.timestamp());
-    let now = Utc::now().timestamp();
+    let now = crate::util::now_iso(); // ISO for the first_seen_at column
 
     state
         .db
@@ -136,13 +137,17 @@ async fn upsert(state: &AppState, account_id: &str, book: &LibraryBook) -> Resul
             // newer than when the user removed it) clears the tombstone. If
             // it's still tombstoned and not re-purchased, skip the upsert
             // entirely so it doesn't reappear.
+            // removed_at is ISO 8601 TEXT; parse back to a unix ts to
+            // compare against purchase_ts.
             let removed_at: Option<i64> = c
                 .query_row(
                     "SELECT removed_at FROM removed_books WHERE asin = ?1 AND account_id = ?2",
                     rusqlite::params![asin, acct],
-                    |r| r.get(0),
+                    |r| r.get::<_, String>(0),
                 )
-                .ok();
+                .ok()
+                .as_deref()
+                .and_then(crate::util::parse_iso);
             if let Some(removed_at) = removed_at {
                 let repurchased = purchase_ts.is_some_and(|pd| pd > removed_at);
                 if !repurchased {

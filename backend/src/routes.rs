@@ -203,7 +203,7 @@ fn env_default_for(state: &AppState, key: &str) -> String {
 async fn list_accounts(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
     let summaries = ShimClient::new(&state).list_accounts().await?;
     let pid = user.id();
-    let local: std::collections::HashMap<String, (Option<i64>, i64, i64)> = state
+    let local: std::collections::HashMap<String, (Option<String>, i64, i64)> = state
         .db
         .with(move |c| {
             let mut stmt = c.prepare(
@@ -219,7 +219,7 @@ async fn list_accounts(user: AuthProfile, State(state): State<AppState>) -> AppR
             let rows = stmt.query_map([pid], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
-                    r.get::<_, Option<i64>>(1)?,
+                    r.get::<_, Option<String>>(1)?,
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                 ))
@@ -462,8 +462,8 @@ async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResul
         String,
         String,
         String,
-        i64,
-        i64,
+        String, // created_at (ISO)
+        String, // updated_at (ISO)
         Option<String>,
         Option<String>,
         Option<String>,
@@ -486,8 +486,8 @@ async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResul
                         r.get::<_, String>(1)?,
                         r.get::<_, String>(2)?,
                         r.get::<_, String>(3)?,
-                        r.get::<_, i64>(4)?,
-                        r.get::<_, i64>(5)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
                         r.get::<_, Option<String>>(6)?,
                         r.get::<_, Option<String>>(7)?,
                         r.get::<_, Option<String>>(8)?,
@@ -642,7 +642,7 @@ async fn remove_book(
             // Tombstone every (asin, account) the caller owns that has a
             // book or job row, before deleting. Scope through accounts so
             // one user can't remove another's books.
-            let now = chrono::Utc::now().timestamp();
+            let now = crate::util::now_iso();
             c.execute(
                 "INSERT OR IGNORE INTO removed_books (asin, account_id, removed_at)
                  SELECT DISTINCT ?1, account_id, ?2 FROM (

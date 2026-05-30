@@ -19,6 +19,7 @@ pub mod sidecar;
 pub mod shim;
 pub mod state;
 pub mod sync;
+pub mod util;
 
 use std::sync::Arc;
 
