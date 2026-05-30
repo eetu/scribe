@@ -10,19 +10,20 @@
 //! library v1 ties output paths to env vars; v2 will move them to a
 //! `libraries` table with per-profile binding.
 
-use chrono::Utc;
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
 use crate::error::AppError;
 use crate::state::AppState;
+use crate::util;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Profile {
     pub id: i64,
     pub user_sub: Option<String>,
     pub email: String,
-    pub created_at: i64,
+    /// ISO 8601 UTC (e.g. `2024-04-01T12:30:00Z`).
+    pub created_at: String,
 }
 
 /// Resolve (or create) the profile for an authenticated request.
@@ -58,7 +59,7 @@ async fn lookup_by_sub(state: &AppState, sub: &str) -> Result<Option<Profile>, A
 async fn create(state: &AppState, sub: &str, email: &str) -> Result<Profile, AppError> {
     let sub_s = sub.to_string();
     let email_s = email.to_string();
-    let now = Utc::now().timestamp();
+    let now = util::now_iso();
     state
         .db
         .with(move |c| {

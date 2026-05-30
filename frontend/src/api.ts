@@ -38,7 +38,8 @@ export type Account = {
   expires_at: number | null;
   needs_refresh: boolean;
   needs_relogin: boolean;
-  last_synced_at: number | null;
+  /** ISO 8601 UTC, e.g. "2024-04-01T12:30:00Z". null if never synced. */
+  last_synced_at: string | null;
   book_count: number;
   active_jobs: number;
 };
@@ -70,8 +71,9 @@ export type Job = {
   asin: string;
   account_id: string;
   status: string;
-  created_at: number;
-  updated_at: number;
+  /** ISO 8601 UTC, e.g. "2024-04-01T12:30:00Z". */
+  created_at: string;
+  updated_at: string;
   error: string | null;
   m4b_present: boolean;
   aaxc_present: boolean;

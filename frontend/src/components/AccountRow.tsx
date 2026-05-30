@@ -268,9 +268,11 @@ function chipButton(theme: ReturnType<typeof useTheme>) {
   };
 }
 
-function relativeTime(unix: number | null): string {
-  if (!unix) return "never";
-  const diff = Math.floor(Date.now() / 1000) - unix;
+function relativeTime(iso: string | null): string {
+  if (!iso) return "never";
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "never";
+  const diff = Math.floor((Date.now() - ms) / 1000);
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;

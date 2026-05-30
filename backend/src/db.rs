@@ -22,7 +22,19 @@ pub struct Db {
 /// can restart mid-edit and advance the version before the matching DDL
 /// is written, but the next boot still converges the schema to match the
 /// code regardless of what the version says.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
+
+/// Timestamp columns migrated from unix-epoch INTEGER to ISO 8601 TEXT
+/// (see `migrate`). Listed here so the one-time conversion stays in sync
+/// with the schema.
+const ISO_TIMESTAMP_COLUMNS: &[(&str, &str)] = &[
+    ("profile", "created_at"),
+    ("accounts", "last_synced_at"),
+    ("books", "first_seen_at"),
+    ("jobs", "created_at"),
+    ("jobs", "updated_at"),
+    ("removed_books", "removed_at"),
+];
 
 impl Db {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
@@ -66,6 +78,22 @@ impl Db {
         // this is a no-op on fresh installs and after the first drop.
         for col in ["role", "display_name"] {
             drop_column_if_exists(conn, "profile", col)?;
+        }
+
+        // One-time: convert legacy unix-epoch INTEGER timestamps to ISO 8601
+        // TEXT. Idempotent — once a value is text, `typeof` is no longer
+        // 'integer' so re-runs skip it. Runs fully here at boot (before the
+        // server accepts requests) so a column never mixes storage classes,
+        // which would break `ORDER BY` (SQLite sorts INTEGER before TEXT).
+        // Identifiers are hardcoded literals, so the inline format is safe.
+        for (table, col) in ISO_TIMESTAMP_COLUMNS {
+            conn.execute(
+                &format!(
+                    "UPDATE {table} SET {col} = strftime('%Y-%m-%dT%H:%M:%SZ', {col}, 'unixepoch') \
+                     WHERE {col} IS NOT NULL AND typeof({col}) = 'integer'"
+                ),
+                [],
+            )?;
         }
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -118,7 +146,7 @@ CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_sub TEXT UNIQUE,
   email TEXT NOT NULL UNIQUE,
-  created_at INTEGER NOT NULL
+  created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_profile_sub ON profile(user_sub);
 
@@ -135,7 +163,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   locale TEXT NOT NULL,
   email_masked TEXT NOT NULL,
   customer_name TEXT,
-  last_synced_at INTEGER
+  last_synced_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_accounts_profile ON accounts(profile_id);
 
@@ -152,7 +180,7 @@ CREATE TABLE IF NOT EXISTS books (
   cover_url TEXT,
   status TEXT NOT NULL,
   purchase_date TEXT,
-  first_seen_at INTEGER NOT NULL,
+  first_seen_at TEXT NOT NULL,
   codec TEXT,
   bitrate_kbps INTEGER,
   sample_rate INTEGER,
@@ -168,8 +196,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL,
   status TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
   error TEXT,
   m4b_path TEXT,
   aaxc_path TEXT
@@ -180,7 +208,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_account ON jobs(account_id);
 CREATE TABLE IF NOT EXISTS removed_books (
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL,
-  removed_at INTEGER NOT NULL,
+  removed_at TEXT NOT NULL,
   PRIMARY KEY (asin, account_id)
 );
 "#;

@@ -28,7 +28,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use uuid::Uuid;
@@ -187,7 +186,7 @@ impl Queue {
 
     pub async fn enqueue(&self, account_id: &str, asin: &str) -> Result<Uuid, AppError> {
         let job_id = Uuid::new_v4();
-        let now = Utc::now().timestamp();
+        let now = crate::util::now_iso();
         let aid = account_id.to_string();
         let a = asin.to_string();
         let id = job_id;
@@ -223,7 +222,7 @@ impl Queue {
             .state
             .db
             .with(move |c| {
-                let now = Utc::now().timestamp();
+                let now = crate::util::now_iso();
                 let n = c.execute(
                     "UPDATE jobs SET status = 'cancelled', updated_at = ?1
                      WHERE id = ?2 AND status = 'queued'",
@@ -313,7 +312,7 @@ impl Queue {
                 tracing::info!(%id, "failed interrupted reconvert on resume");
                 continue;
             }
-            let now = Utc::now().timestamp();
+            let now = crate::util::now_iso();
             let id_s = id.to_string();
             self.inner
                 .state
@@ -364,7 +363,7 @@ impl Inner {
     pub(crate) async fn set_phase(&self, job_id: Uuid, phase: Lifecycle, retry_count: u32) -> Result<(), AppError> {
         let id_s = job_id.to_string();
         let phase_s = phase.as_str().to_string();
-        let now = Utc::now().timestamp();
+        let now = crate::util::now_iso();
         self.state
             .db
             .with(move |c| {
@@ -403,7 +402,7 @@ impl Inner {
         let id_s = job_id.to_string();
         let aaxc_s = aaxc.to_string();
         let m4b_s = m4b.to_string();
-        let now = Utc::now().timestamp();
+        let now = crate::util::now_iso();
         self.state
             .db
             .with(move |c| {
@@ -428,7 +427,7 @@ impl Inner {
     pub(crate) async fn save_failure(&self, job_id: Uuid, msg: &str) -> Result<(), AppError> {
         let id_s = job_id.to_string();
         let msg_s = msg.to_string();
-        let now = Utc::now().timestamp();
+        let now = crate::util::now_iso();
         self.state
             .db
             .with(move |c| {
@@ -447,7 +446,7 @@ impl Inner {
 
     async fn save_cancelled(&self, job_id: Uuid) {
         let id_s = job_id.to_string();
-        let now = Utc::now().timestamp();
+        let now = crate::util::now_iso();
         let _ = self
             .state
             .db

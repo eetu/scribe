@@ -14,7 +14,6 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
 use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
@@ -130,7 +129,7 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
         if !m4b_present {
             return Ok(Outcome::Already);
         }
-        let now = Utc::now().timestamp();
+        let now = crate::util::now_iso();
         let promoted = state
             .db
             .with({
@@ -155,7 +154,7 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
     }
 
     let id = Uuid::new_v4().to_string();
-    let now = Utc::now().timestamp();
+    let now = crate::util::now_iso();
     let downloaded_at = sc.downloaded_at;
     state
         .db
