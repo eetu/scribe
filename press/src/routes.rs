@@ -86,7 +86,8 @@ async fn job_status(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let s = state.jobs.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
     let status = s.lock().await.status();
-    Ok(Json(serde_json::to_value(status).unwrap()))
+    let body = serde_json::to_value(status).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(body))
 }
 
 async fn job_sse(
