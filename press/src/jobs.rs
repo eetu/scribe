@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use scribe_shared::{Chapter, JobEvent};
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,58 @@ mod tests {
         assert!(Drm::Aax { activation_bytes: "-y deadb".into() }.validate().is_err());
         assert!(Drm::Aax { activation_bytes: "zzzzzzzz".into() }.validate().is_err());
     }
+
+    use super::{JobMap, JobReq};
+    use uuid::Uuid;
+
+    fn sample_req() -> JobReq {
+        JobReq {
+            content_url: "https://example.invalid/x".into(),
+            drm: aaxc(&"a".repeat(32), &"0".repeat(32)),
+            asin: "B00TEST".into(),
+            title: "t".into(),
+            authors: vec![],
+            narrators: vec![],
+            series_title: None,
+            series_sequence: None,
+            chapters: vec![],
+            cover_url: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn sweep_removes_aged_jobs_and_purges_tmp() {
+        let tmp = std::env::temp_dir().join(format!("press-sweep-test-{}", Uuid::new_v4()));
+        let map = JobMap::new(tmp.clone(), 1);
+        let st = map.create(sample_req()).await.unwrap();
+        let (id, dir) = {
+            let g = st.lock().await;
+            (g.id, g.dir.clone())
+        };
+        assert!(map.get(id).await.is_some());
+        assert!(dir.exists());
+
+        // max_age 0 → every job counts as aged out.
+        let swept = map.sweep(std::time::Duration::ZERO).await;
+        assert_eq!(swept, 1);
+        assert!(map.get(id).await.is_none(), "job removed from map");
+        assert!(!dir.exists(), "tmp dir purged");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_fresh_jobs() {
+        let tmp = std::env::temp_dir().join(format!("press-sweep-fresh-{}", Uuid::new_v4()));
+        let map = JobMap::new(tmp.clone(), 1);
+        let st = map.create(sample_req()).await.unwrap();
+        let id = st.lock().await.id;
+        // A 1h cutoff leaves a just-created job alone.
+        let swept = map.sweep(std::time::Duration::from_secs(3600)).await;
+        assert_eq!(swept, 0);
+        assert!(map.get(id).await.is_some());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +184,8 @@ pub struct JobState {
     pub id: Uuid,
     pub req: JobReq,
     pub dir: PathBuf,
+    /// When the job was created — for the aged-out sweep.
+    pub created: Instant,
     pub phase: Phase,
     pub aaxc_bytes: u64,
     pub aaxc_bytes_total: Option<u64>,
@@ -186,6 +241,7 @@ impl JobMap {
             id,
             req,
             dir,
+            created: Instant::now(),
             phase: Phase::Queued,
             aaxc_bytes: 0,
             aaxc_bytes_total: None,
@@ -203,6 +259,36 @@ impl JobMap {
 
     pub async fn remove(&self, id: Uuid) -> Option<Arc<Mutex<JobState>>> {
         self.inner.lock().await.remove(&id)
+    }
+
+    /// Drop jobs older than `max_age`: remove the entry and purge its tmp
+    /// dir. Without this, a job the backend never DELETEs (crash, lost
+    /// connection) leaks both its scratch files and its in-memory state —
+    /// which holds the per-book voucher key/iv — until the process restarts.
+    /// Returns how many were swept.
+    pub async fn sweep(&self, max_age: Duration) -> usize {
+        let now = Instant::now();
+        // Snapshot (id, Arc) and release the map lock before locking any job,
+        // so we never hold the map lock across a per-job lock.
+        let entries: Vec<(Uuid, Arc<Mutex<JobState>>)> = {
+            let map = self.inner.lock().await;
+            map.iter().map(|(k, v)| (*k, v.clone())).collect()
+        };
+        let mut stale = Vec::new();
+        for (id, st) in entries {
+            if now.duration_since(st.lock().await.created) >= max_age {
+                stale.push(id);
+            }
+        }
+        let mut swept = 0;
+        for id in stale {
+            if let Some(st) = self.remove(id).await {
+                let dir = st.lock().await.dir.clone();
+                purge_dir(&dir).await;
+                swept += 1;
+            }
+        }
+        swept
     }
 }
 
