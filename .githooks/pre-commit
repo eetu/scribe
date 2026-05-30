@@ -21,7 +21,10 @@ if echo "$STAGED" | grep -qE "^(backend|press|shared)/|^Cargo\.(toml|lock)$"; th
   (cd "$ROOT" && cargo clippy --workspace --all-targets -- -D warnings)
 fi
 
-if echo "$STAGED" | grep -q "^shim/"; then
+# Only Python (or the project manifest) — markdown/docs under shim/ aren't
+# ruff's concern, and ruff is installed via the shim dev group (uv.lock),
+# so `uv run ruff` resolves it without a separate global install.
+if echo "$STAGED" | grep -qE "^shim/.*\.py$|^shim/pyproject\.toml$"; then
   echo "→ shim ruff..."
   (cd "$ROOT/shim" && uv run ruff check src)
 fi
