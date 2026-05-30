@@ -28,18 +28,22 @@ COPY backend/Cargo.toml backend/Cargo.toml
 COPY press/Cargo.toml press/Cargo.toml
 COPY shared/Cargo.toml shared/Cargo.toml
 COPY shelf/Cargo.toml shelf/Cargo.toml
-# Stub sources for every workspace member. Press isn't shipped in the
-# backend image (it usually runs as a native binary on its host), but
-# cargo still demands every declared member's manifest target exists on
-# disk for workspace discovery to succeed.
-RUN mkdir -p backend/src press/src shared/src shelf/src \
+COPY e2e/Cargo.toml e2e/Cargo.toml
+# Stub sources for every workspace member — cargo must parse all member
+# manifests to load the workspace, even ones we don't ship. `e2e` is a
+# test-only crate (not built here), so it just needs a stub lib to exist;
+# we build only the three shipped crates so e2e's test deps stay out of the
+# image dep cache. (Press isn't shipped in the backend image but is built
+# here so its dep layer is warm for the optional press image.)
+RUN mkdir -p backend/src press/src shared/src shelf/src e2e/src \
     && printf 'fn main() {}\n' > backend/src/main.rs \
     && : > backend/src/lib.rs \
     && printf 'fn main() {}\n' > press/src/main.rs \
     && printf 'fn main() {}\n' > shelf/src/main.rs \
     && : > shelf/src/lib.rs \
     && : > shared/src/lib.rs \
-    && xx-cargo build --release --workspace
+    && : > e2e/src/lib.rs \
+    && xx-cargo build --release -p scribe-backend -p scribe-press -p scribe-shelf
 
 # --- Stage 3a: Build scribe-backend ---
 FROM workspace-deps AS backend-build
