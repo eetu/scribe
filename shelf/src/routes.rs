@@ -190,7 +190,7 @@ async fn library_items(
                     runtime_length_ms: r.get::<_, Option<i64>>(8)?,
                     cover_url: r.get::<_, Option<String>>(9)?,
                     purchase_date: r.get::<_, Option<String>>(10)?,
-                    first_seen_at: r.get::<_, i64>(11)?,
+                    first_seen_at: first_seen_epoch(r, 11)?,
                     language: None,
                     m4b_path: r.get::<_, Option<String>>(12)?,
                     aaxc_path: r.get::<_, Option<String>>(13)?,
@@ -289,7 +289,7 @@ async fn item_detail(
                         runtime_length_ms: r.get::<_, Option<i64>>(8)?,
                         cover_url: r.get::<_, Option<String>>(9)?,
                         purchase_date: r.get::<_, Option<String>>(10)?,
-                        first_seen_at: r.get::<_, i64>(11)?,
+                        first_seen_at: first_seen_epoch(r, 11)?,
                         language: None,
                         m4b_path: r.get::<_, Option<String>>(12)?,
                         aaxc_path: r.get::<_, Option<String>>(13)?,
@@ -501,6 +501,18 @@ struct BookRow {
     /// JSON array of `scribe_shared::Chapter` persisted by scribe, or
     /// None when not yet probed. Emitted as ABS `media.chapters`.
     chapters_json: Option<String>,
+}
+
+/// Read `books.first_seen_at` as unix seconds. The column is ISO 8601 TEXT
+/// ("2026-06-02T19:33:50Z") since scribe's v6 migration; ABS clients need
+/// epoch millis, so parse here and let `build_item` do the ×1000.
+fn first_seen_epoch(r: &rusqlite::Row, idx: usize) -> rusqlite::Result<i64> {
+    let s: String = r.get(idx)?;
+    chrono::DateTime::parse_from_rfc3339(&s)
+        .map(|dt| dt.timestamp())
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
+        })
 }
 
 /// Parse the stored chapters JSON into ABS chapter objects (seconds).
