@@ -51,7 +51,7 @@ jobs:
         working-directory: shim
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -70,7 +70,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
       # The harness (scribe-e2e) boots backend + shim + press + shelf with
