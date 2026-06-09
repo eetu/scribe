@@ -4,24 +4,25 @@ description: Use this skill to generate well-branded interfaces and assets for t
 user-invocable: true
 ---
 
-Read `README.md` in this skill, plus `colors_and_type.css` and `assets/`.
+# scribe-design
+
+Shared tokens + conventions come from `halo-design`. scribe is a React app, so
+tokens are mirrored into `frontend/src/themes.ts` (copied verbatim from halo —
+the canonical CSS is not shipped; see halo-design's "React production" note) and
+consumed via the Emotion `css` prop. Below is scribe's delta.
 
 For production code, the source of truth lives in the host repo:
+
+- Theme tokens: `frontend/src/themes.ts` (verbatim from halo)
 - Components: `frontend/src/components/`
-- Theme tokens: `frontend/src/themes.ts` (copied verbatim from halo)
 - Routes: `frontend/src/routes/` (TanStack Router, file-based)
-- Wordmark: `frontend/src/components/Wordmark.tsx`
+- Wordmark + glyph: `frontend/src/components/Wordmark.tsx`, `assets/scribe-logo.svg`
 
-If creating visual artifacts (slides, mocks, throwaway prototypes, etc), copy
-assets out and create static HTML files for the user to view. If working on
-production code, refer to existing components first; do not recreate them as
-JSX prototypes.
+Refer to existing components first; don't recreate them as JSX prototypes. For
+throwaway artifacts (mocks, slides), build static HTML with the `--halo-*` vars.
+If invoked with no task, ask what to build, then act as an expert designer.
 
-If the user invokes this skill without any other guidance, ask them what they
-want to build or design, ask some questions, and act as an expert designer
-who outputs HTML artifacts _or_ production code, depending on the need.
-
-Key things to keep in mind for scribe:
+## The four deltas
 
 - **Sibling of halo and chat.** Identical color palette, fonts, shadow,
   radius. Anyone who has used halo or chat should immediately recognize
@@ -30,7 +31,7 @@ Key things to keep in mind for scribe:
   `letter-spacing: -0.04em`, accent period. Pulp Fiction reference —
   Jules' Ezekiel 25:17 speech ("the path of the righteous man" with
   "man" swapped for "scribe"). On narrow screens (≤600px) the `the path
-  of the righteous ` prefix collapses, leaving `scribe.` alone. Same
+  of the righteous` prefix collapses, leaving `scribe.` alone. Same
   pattern as chat's `royale with chat.` → `chat.`.
 - **Glyph: closed book outline + audio ripples + warm dot.** A `currentColor`
   rounded-rect book with a spine groove on the left. Inside the front cover,
@@ -47,8 +48,9 @@ Key things to keep in mind for scribe:
   No top nav bar, no breadcrumbs.
 - **Cards: 6px radius, soft shadow** in light theme; shadow off in dark.
   Same as halo and chat.
-- **No emoji, no hero imagery.** Cover art on book cards is the only
-  imagery — Material Icons Outlined for any other glyph.
+- **No emoji, no hero imagery.** Cover art on book cards is the only imagery.
+  Other glyphs are inline `currentColor` SVG (no icon dep); if a pack is ever
+  added, use Lucide (`lucide-react`) per halo-design.
 - **Touch-friendly.** Tap targets large. Long-press a job row to cancel.
 
 ## Differences from halo and chat
