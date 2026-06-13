@@ -152,7 +152,7 @@ CMD ["./scribe-shelf"]
 # Shim is Pi-side too. Keeps mkb79/audible's Python deps isolated from the
 # Rust backend so a rotting Audible auth flow swap doesn't force the Rust
 # image to rebuild.
-FROM python:3.14.5-slim AS shim-runner
+FROM python:3.15.0b2-slim AS shim-runner
 WORKDIR /app
 LABEL org.opencontainers.image.description="scribe-shim — Audible auth + library + voucher sidecar"
 LABEL org.opencontainers.image.source="https://github.com/eetu/scribe"
