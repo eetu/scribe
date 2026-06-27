@@ -5,7 +5,7 @@ description = "Audible auth + library + voucher sidecar wrapping mkb79/audible"
 requires-python = ">=3.10"
 dependencies = [
   "audible>=0.10",
-  "fastapi>=0.136.3",
+  "fastapi>=0.138.0",
   # Plain uvicorn (not [standard]): the loopback, low-QPS sidecar doesn't
   # need uvloop/httptools/websockets/watchfiles — dropping them cuts RSS +
   # image size on the 1 GB Pi. uvicorn falls back to asyncio + h11.
