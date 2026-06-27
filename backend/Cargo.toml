@@ -28,7 +28,7 @@ url = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
 dotenvy = { workspace = true }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 rand = "0.10"
 openidconnect = { workspace = true }
 time = "0.3"
