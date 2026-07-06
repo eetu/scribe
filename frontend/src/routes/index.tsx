@@ -15,13 +15,7 @@ const ACTIVE_JOB_PHASES = new Set([
 ]);
 
 type FilterKey =
-  | "all"
-  | "done"
-  | "failed"
-  | "unavailable"
-  | "missing"
-  | "in_progress"
-  | "new";
+  "all" | "done" | "failed" | "unavailable" | "missing" | "in_progress" | "new";
 type SortKey = "title" | "author" | "added" | "status";
 
 function bucket(job: Job | null): Exclude<FilterKey, "all"> {
