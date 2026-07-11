@@ -98,7 +98,7 @@ jobs:
       - name: Extract metadata for backend image
         id: meta_backend
         if: steps.gate.outputs.backend == 'true'
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_BACKEND }}
           tags: |
@@ -129,7 +129,7 @@ jobs:
       - name: Extract metadata for shim image
         id: meta_shim
         if: steps.gate.outputs.shim == 'true'
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_SHIM }}
           tags: |
@@ -155,7 +155,7 @@ jobs:
       - name: Extract metadata for press image
         id: meta_press
         if: steps.gate.outputs.press == 'true'
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PRESS }}
           tags: |
@@ -181,7 +181,7 @@ jobs:
       - name: Extract metadata for shelf image
         id: meta_shelf
         if: steps.gate.outputs.shelf == 'true'
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_SHELF }}
           tags: |
