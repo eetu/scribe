@@ -9,7 +9,7 @@ dependencies = [
   # Plain uvicorn (not [standard]): the loopback, low-QPS sidecar doesn't
   # need uvloop/httptools/websockets/watchfiles — dropping them cuts RSS +
   # image size on the 1 GB Pi. uvicorn falls back to asyncio + h11.
-  "uvicorn>=0.50.0",
+  "uvicorn>=0.51.0",
   "cryptography>=49.0.0",
   "python-dotenv>=1.2.2",
 ]
