@@ -11,18 +11,7 @@ from typing import Any
 
 import audible
 
-_RESPONSE_GROUPS = ",".join(
-    [
-        "product_desc",
-        "product_attrs",
-        "product_extended_attrs",
-        "media",
-        "series",
-        "contributors",
-        "relationships",
-        "price",
-    ]
-)
+_RESPONSE_GROUPS = "product_desc,product_attrs,product_extended_attrs,media,series,contributors,relationships,price"
 
 
 def fetch(auth: audible.Authenticator, page: int, num_results: int, status: str | None) -> dict[str, Any]:

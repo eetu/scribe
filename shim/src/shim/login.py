@@ -100,7 +100,7 @@ def _worker(sess: _Session) -> None:
             "customer_name": customer.get("name"),
             "locale": sess.locale,
         }
-    except Exception as exc:  # noqa: BLE001 — surface any failure
+    except Exception as exc:
         log.exception("login failed for session %s", sess.session_id)
         sess.error = str(exc)
     finally:

@@ -16,7 +16,9 @@ from typing import Any
 import audible
 
 try:  # pragma: no cover — runtime dep version skew
-    from audible.aescipher import decrypt_voucher_from_licenserequest  # type: ignore[attr-defined]
+    from audible.aescipher import (
+        decrypt_voucher_from_licenserequest,  # type: ignore[attr-defined]
+    )
 except ImportError:  # pragma: no cover
     decrypt_voucher_from_licenserequest = None  # type: ignore[assignment]
 

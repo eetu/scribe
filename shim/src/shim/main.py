@@ -61,7 +61,7 @@ def _audible_version() -> str:
         import audible
 
         return getattr(audible, "__version__", "unknown")
-    except Exception:  # pragma: no cover
+    except Exception:  # pragma: no cover  # noqa: BLE001
         return "missing"
 
 
@@ -133,7 +133,7 @@ def deregister(account_id: str) -> dict[str, Any]:
     auth = _load_or_404(account_id)
     try:
         auth.deregister_device()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("deregister failed for %s", account_id)
         raise _http_error(502, "deregister_failed", _safe_detail(exc))
     accounts.evict(account_id)
@@ -145,7 +145,7 @@ def refresh(account_id: str) -> dict[str, Any]:
     auth = _load_or_404(account_id)
     try:
         auth.refresh_access_token(force=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("refresh failed for %s", account_id)
         raise _http_error(401, "refresh_failed", _safe_detail(exc), needs_relogin=True)
     accounts.save(account_id, auth)
@@ -162,7 +162,7 @@ def get_library(
     auth = _load_or_404(account_id)
     try:
         return library.fetch(auth, page=page, num_results=num_results, status=status)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("library fetch failed for %s", account_id)
         raise _http_error(502, "library_failed", _safe_detail(exc))
 
@@ -172,7 +172,7 @@ def get_voucher(account_id: str, asin: str) -> dict[str, Any]:
     auth = _load_or_404(account_id)
     try:
         res = voucher.fetch(auth, asin)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("voucher fetch failed for %s/%s", account_id, asin)
         raise _http_error(502, "voucher_failed", _safe_detail(exc))
     if "_error" in res:
@@ -185,7 +185,7 @@ def get_metadata(account_id: str, asin: str) -> dict[str, Any]:
     auth = _load_or_404(account_id)
     try:
         return voucher.fetch_metadata(auth, asin)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("metadata fetch failed for %s/%s", account_id, asin)
         raise _http_error(502, "metadata_failed", _safe_detail(exc))
 
