@@ -30,6 +30,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@anarkisti/igyb@npm:^0.5.0":
+  version: 0.5.0
+  resolution: "@anarkisti/igyb@npm:0.5.0"
+  peerDependencies:
+    svelte: ^5
+  peerDependenciesMeta:
+    svelte:
+      optional: true
+  checksum: 10/f3db38acfe33ac4d43a076a5ddc1a409abeedcd0e0ddcc1f01be50be65c6d129dda6f013e3d156bc39a7fa48b11120fe73af5054b276a9dcb941375efe1f266c
+  languageName: node
+  linkType: hard
+
 "@babel/code-frame@npm:^7.0.0, @babel/code-frame@npm:^7.28.6, @babel/code-frame@npm:^7.29.0":
   version: 7.29.0
   resolution: "@babel/code-frame@npm:7.29.0"
@@ -2947,6 +2959,7 @@ __metadata:
   resolution: "scribe-frontend@workspace:."
   dependencies:
     "@anarkisti/eslint-config": "npm:^1.1.0"
+    "@anarkisti/igyb": "npm:^0.5.0"
     "@emotion/react": "npm:^11.14.0"
     "@tanstack/eslint-plugin-router": "npm:^1.162.0"
     "@tanstack/react-router": "npm:^1.170.17"

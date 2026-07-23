@@ -15,6 +15,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anarkisti/igyb": "^0.5.0",
     "@emotion/react": "^11.14.0",
     "@tanstack/react-router": "^1.170.17",
     "classnames": "^2.5.1",

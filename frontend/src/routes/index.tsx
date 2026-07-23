@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 
 import { api, audioUrl, type Book, type Job } from "../api";
 import BookCard from "../components/BookCard";
+import EmptyShelfBackground from "../components/EmptyShelfBackground";
 
 const ACTIVE_JOB_PHASES = new Set([
   "queued",
@@ -156,18 +157,39 @@ function LibraryPage() {
   if (isLoading) return null;
 
   if (items.length === 0) {
+    // Empty shelf: a scribe-style panel with a whisper-subtle book field behind
+    // the message (EmptyShelfBackground). It renders only in this branch, so it
+    // never sits behind the populated grid below.
     return (
       <div
         css={{
-          textAlign: "center",
-          marginTop: "12vh",
-          color: theme.colors.text.muted,
-          fontSize: 16,
+          position: "relative",
+          overflow: "hidden",
+          minHeight: "60vh",
+          borderRadius: theme.border.radius,
+          border: `1px solid ${theme.colors.border}`,
+          background: theme.colors.background.main,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        {(accounts?.length ?? 0) === 0
-          ? "no audible accounts linked yet. visit accounts."
-          : "no books yet. they show up here after the next sync."}
+        <EmptyShelfBackground />
+        <p
+          css={{
+            position: "relative",
+            margin: 0,
+            padding: "0 24px",
+            textAlign: "center",
+            color: theme.colors.text.muted,
+            fontSize: 16,
+            lineHeight: 1.5,
+          }}
+        >
+          {(accounts?.length ?? 0) === 0
+            ? "no audible accounts linked yet. visit accounts."
+            : "no books yet. they show up here after the next sync."}
+        </p>
       </div>
     );
   }
