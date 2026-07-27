@@ -4,14 +4,18 @@
 FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 
 # --- Stage 1: Build frontend (native, output is platform-independent) ---
-FROM --platform=$BUILDPLATFORM node:25-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend-build
 ARG SCRIBE_IMAGE_TAG
 ENV VITE_SCRIBE_IMAGE_TAG=$SCRIBE_IMAGE_TAG
 WORKDIR /app
 COPY frontend/package.json frontend/yarn.lock frontend/.yarnrc.yml* ./
-RUN corepack enable && yarn install --immutable --network-timeout 1000000
+# Node 25 unbundled corepack, so `corepack enable` is gone from the image.
+# The yarn release is vendored in-repo (see .yarnrc.yml `yarnPath`), so run it
+# with node directly rather than fetching a package manager to fetch packages.
+COPY frontend/.yarn/releases/ .yarn/releases/
+RUN node .yarn/releases/yarn-*.cjs install --immutable --network-timeout 1000000
 COPY frontend/ .
-RUN yarn build
+RUN node .yarn/releases/yarn-*.cjs build
 
 # --- Stage 2: Build workspace dependencies (native, cross-compiled) ---
 #
@@ -152,7 +156,11 @@ CMD ["./scribe-shelf"]
 # Shim is Pi-side too. Keeps mkb79/audible's Python deps isolated from the
 # Rust backend so a rotting Audible auth flow swap doesn't force the Rust
 # image to rebuild.
-FROM python:3.15.0b3-slim AS shim-runner
+# Stay on a stable interpreter: cffi (via audible → cryptography) publishes
+# aarch64 wheels up to cp314 and none for cp315, so a 3.15 base makes uv build
+# it from sdist and the slim image has no gcc. Don't bump past 3.14 until the
+# wheels exist — see the cffi entry in shim/uv.lock for the available tags.
+FROM python:3.14-slim AS shim-runner
 WORKDIR /app
 LABEL org.opencontainers.image.description="scribe-shim — Audible auth + library + voucher sidecar"
 LABEL org.opencontainers.image.source="https://github.com/eetu/scribe"
