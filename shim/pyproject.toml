@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Audible auth + library + voucher sidecar wrapping mkb79/audible"
 requires-python = ">=3.10"
 dependencies = [
-  "audible>=0.10",
+  "audible>=0.10.0",
   "fastapi>=0.139.2",
   # Plain uvicorn (not [standard]): the loopback, low-QPS sidecar doesn't
   # need uvloop/httptools/websockets/watchfiles — dropping them cuts RSS +
