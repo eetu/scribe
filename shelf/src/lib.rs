@@ -47,6 +47,11 @@ pub async fn run() -> anyhow::Result<()> {
         library_dir = %cfg.library_dir.display(),
         "scribe-shelf listening",
     );
-    axum::serve(listener, app).await?;
+    // Drain on SIGTERM instead of being SIGKILLed 10s into every restart —
+    // an unattended AutoUpdate would otherwise sever in-flight downloads.
+    axum::serve(listener, app)
+        .with_graceful_shutdown(scribe_shared::shutdown::signal_from_env())
+        .await?;
+    tracing::info!("scribe-shelf stopped");
     Ok(())
 }

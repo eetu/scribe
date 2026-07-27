@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod shutdown;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookMeta {
     pub asin: String,

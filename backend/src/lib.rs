@@ -120,6 +120,9 @@ pub async fn run_server() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!(bind = %cfg.bind, dev_auth = cfg.dev_auth, "scribe listening");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(scribe_shared::shutdown::signal_from_env())
+        .await?;
+    tracing::info!("scribe stopped");
     Ok(())
 }
