@@ -39,3 +39,7 @@ dotenvy = "0.15"
 rand = "0.10"
 openidconnect = "4"
 tempfile = "3"
+# Only needed to hand ServeFile an explicit Content-Type. Already in the
+# graph via tower-http's `fs` feature, so this is a direct-dep declaration
+# rather than a new build.
+mime = "0.3"

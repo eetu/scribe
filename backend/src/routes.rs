@@ -855,39 +855,51 @@ async fn assert_owns_account(state: &AppState, profile_id: i64, account_id: &str
 /// duration of one press round-trip, then revoked. AAXC bytes are still
 /// encrypted at this layer; the matching voucher key/iv lives only in
 /// the in-memory press request body, never in this URL.
+///
+/// Ranges are honoured, not merely advertised: press probes the total size
+/// with `Range: bytes=0-0` and reads it back off `Content-Range`
+/// (`probe_total` in press/src/ffmpeg.rs), mirroring the Audible CDN flow.
+/// A bare 200 would leave the job with no `aaxc_bytes_total` and a progress
+/// bar stuck at 0%.
 async fn serve_internal_aaxc(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    req: axum::extract::Request,
 ) -> Result<axum::response::Response, AppError> {
     let path = state
         .aaxc_tokens
         .lookup(&token)
         .await
         .ok_or(AppError::NotFound)?;
-    let file = tokio::fs::File::open(&path)
+    serve_local_file(&path, req, &mime::APPLICATION_OCTET_STREAM).await
+}
+
+/// Serve a local file with RFC 9110 range semantics — `Accept-Ranges`, 206 +
+/// `Content-Range`, 416, `ETag`, `Last-Modified` — by delegating to tower-http
+/// instead of hand-rolling the header algebra.
+///
+/// `shelf`'s `serve_file_validated` is the fuller version of this: it also
+/// honours `If-Range`, which a client resuming a partial download needs.
+/// Nothing here does, because press probes and downloads inside a single job
+/// and the token is revoked when that job ends, so the file can't be swapped
+/// underneath a resume.
+async fn serve_local_file(
+    path: &std::path::Path,
+    req: axum::extract::Request,
+    content_type: &mime::Mime,
+) -> Result<axum::response::Response, AppError> {
+    let mut svc = tower_http::services::ServeFile::new_with_mime(path, content_type);
+    // `try_call` reports real io failures (EIO, a NAS mount that vanished) as
+    // errors; a missing or unreadable file it answers with a bare 404, which
+    // we re-raise as our own so the error shape stays consistent.
+    let resp = svc
+        .try_call(req)
         .await
-        .map_err(|_| AppError::NotFound)?;
-    let len = file
-        .metadata()
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?
-        .len();
-    let stream = tokio_util::io::ReaderStream::new(file);
-    let body = axum::body::Body::from_stream(stream);
-    use axum::http::header;
-    use axum::response::IntoResponse;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-            (header::CONTENT_LENGTH, len.to_string()),
-            // Press uses Range probes for total-size detection. Advertise
-            // support so the Content-Range/Content-Length flow mirrors
-            // what the Audible CDN serves.
-            (header::ACCEPT_RANGES, "bytes".to_string()),
-        ],
-        body,
-    )
-        .into_response())
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    if resp.status() == axum::http::StatusCode::NOT_FOUND {
+        return Err(AppError::NotFound);
+    }
+    Ok(resp.map(axum::body::Body::new))
 }
 
 async fn reconvert_job(
@@ -917,4 +929,83 @@ async fn assert_owns_job(state: &AppState, profile_id: i64, job_id: Uuid) -> App
         return Err(AppError::NotFound);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{header, StatusCode};
+
+    const LEN: usize = 1234;
+
+    fn fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("book.aaxc");
+        std::fs::write(&path, vec![7u8; LEN]).expect("write fixture");
+        (dir, path)
+    }
+
+    fn get(range: Option<&str>) -> axum::extract::Request {
+        let mut b = axum::extract::Request::builder().uri("/internal/aaxc/token");
+        if let Some(range) = range {
+            b = b.header(header::RANGE, range);
+        }
+        b.body(axum::body::Body::empty()).expect("build request")
+    }
+
+    /// press sizes the AAXC with a `Range: bytes=0-0` probe and reads the
+    /// total back off `Content-Range` (`probe_total` in press/src/ffmpeg.rs).
+    /// This route used to advertise `Accept-Ranges` while ignoring `Range`, so
+    /// the probe got a 200 with no `Content-Range`, gave up, and the reconvert
+    /// job never learned `aaxc_bytes_total` — a progress bar stuck at 0%.
+    #[tokio::test]
+    async fn range_probe_reports_total_size() {
+        let (_dir, path) = fixture();
+        let resp = serve_local_file(&path, get(Some("bytes=0-0")), &mime::APPLICATION_OCTET_STREAM)
+            .await
+            .expect("serve");
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        let content_range = resp
+            .headers()
+            .get(header::CONTENT_RANGE)
+            .expect("206 must carry Content-Range")
+            .to_str()
+            .expect("ascii");
+        assert_eq!(content_range, format!("bytes 0-0/{LEN}"));
+        // The parse press actually performs, so this test fails if the format
+        // drifts out from under it.
+        assert_eq!(
+            content_range.rsplit('/').next().and_then(|s| s.parse::<u64>().ok()),
+            Some(LEN as u64)
+        );
+    }
+
+    #[tokio::test]
+    async fn full_get_reports_length_and_range_support() {
+        let (_dir, path) = fixture();
+        let resp = serve_local_file(&path, get(None), &mime::APPLICATION_OCTET_STREAM)
+            .await
+            .expect("serve");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get(header::ACCEPT_RANGES).unwrap(), "bytes");
+        assert_eq!(
+            resp.headers().get(header::CONTENT_LENGTH).unwrap(),
+            LEN.to_string().as_str()
+        );
+    }
+
+    /// A revoked token resolves to a path that no longer exists; that must be
+    /// our 404, not tower-http's.
+    #[tokio::test]
+    async fn missing_file_is_not_found() {
+        let (dir, _) = fixture();
+        let err = serve_local_file(
+            &dir.path().join("gone.aaxc"),
+            get(None),
+            &mime::APPLICATION_OCTET_STREAM,
+        )
+        .await
+        .expect_err("missing file must not serve");
+        assert!(matches!(err, AppError::NotFound));
+    }
 }

@@ -14,9 +14,10 @@ if echo "$STAGED" | grep -q "^frontend/"; then
   (cd "$ROOT/frontend" && yarn format)
 fi
 
-# backend, press, shared all live under the same cargo workspace — any
-# Rust touch runs workspace-wide clippy. Cheap with the dep cache warm.
-if echo "$STAGED" | grep -qE "^(backend|press|shared)/|^Cargo\.(toml|lock)$"; then
+# backend, press, shared, shelf and e2e all live under the same cargo
+# workspace — any Rust touch runs workspace-wide clippy. Cheap with the dep
+# cache warm.
+if echo "$STAGED" | grep -qE "^(backend|press|shared|shelf|e2e)/|^Cargo\.(toml|lock)$"; then
   echo "→ cargo clippy --workspace..."
   (cd "$ROOT" && cargo clippy --workspace --all-targets -- -D warnings)
 fi

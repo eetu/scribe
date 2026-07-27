@@ -100,4 +100,49 @@ async fn full_stack_smoke() {
         libs["libraries"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
         "shelf should expose at least one library"
     );
+
+    // --- shelf audio stream: ranges + validators --------------------------
+    // Listen This resumes an interrupted background download only if this
+    // route advertises ranges AND carries a validator; without one URLSession
+    // throws its resume data away and restarts from byte 0.
+    let bytes: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+    let item = s.seed_m4b("smoke-account", "B00SMOKE01", &bytes);
+    let file_url = format!(
+        "{}/api/items/{}/file/ino-0?token={}",
+        s.shelf, item, s.shelf_key
+    );
+
+    let full = s.http.get(&file_url).send().await.expect("shelf stream");
+    assert_eq!(
+        full.status().as_u16(),
+        200,
+        "?token= must authorize the stream route"
+    );
+    let h = full.headers().clone();
+    assert_eq!(h.get("accept-ranges").map(|v| v.as_bytes()), Some(&b"bytes"[..]));
+    assert!(h.contains_key("etag"), "stream needs an ETag to be resumable");
+    assert!(h.contains_key("last-modified"), "stream needs Last-Modified");
+    assert_eq!(
+        h.get("content-length").map(|v| v.as_bytes()),
+        Some(&b"8192"[..]),
+        "an accurate length is what the client's truncation guard keys on"
+    );
+    assert_eq!(full.bytes().await.expect("body").as_ref(), bytes.as_slice());
+
+    let partial = s
+        .http
+        .get(&file_url)
+        .header("Range", "bytes=8000-")
+        .send()
+        .await
+        .expect("shelf ranged stream");
+    assert_eq!(partial.status().as_u16(), 206, "Range must yield 206");
+    assert_eq!(
+        partial.headers().get("content-range").map(|v| v.as_bytes()),
+        Some(&b"bytes 8000-8191/8192"[..])
+    );
+    assert_eq!(
+        partial.bytes().await.expect("partial body").as_ref(),
+        &bytes[8000..]
+    );
 }
