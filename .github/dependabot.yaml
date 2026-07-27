@@ -84,6 +84,25 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    # Base-image bumps are the one dependency class no other CI job can
+    # vet — the Rust/frontend/shim jobs run on the GitHub runner, not in
+    # the image. Two of them broke the image build for four days in July
+    # 2026 before anyone noticed, so the risky shapes are ignored here and
+    # dockerimage.yaml now builds on Dockerfile-touching PRs as a backstop.
+    ignore:
+      # Odd-numbered Node lines never become LTS and go EOL within months.
+      # A bump to 25 is what moved the frontend stage off LTS 24 and onto a
+      # release that was already dead — and Node 25 dropped the bundled
+      # corepack, breaking the build. Even majors only; extend as needed.
+      - dependency-name: "node"
+        versions: ["25.x", "27.x", "29.x", "31.x"]
+      # cffi (via audible → cryptography) publishes aarch64 wheels through
+      # cp314 and none for cp315, so a 3.15 base makes uv build it from
+      # sdist and python:*-slim has no gcc. Minor bumps are the interpreter
+      # line here (3.14 → 3.15), so hold them until the wheels land.
+      # REMOVE THIS once shim/uv.lock's cffi entry lists cp315 wheels.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
