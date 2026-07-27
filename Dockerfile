@@ -9,9 +9,13 @@ ARG SCRIBE_IMAGE_TAG
 ENV VITE_SCRIBE_IMAGE_TAG=$SCRIBE_IMAGE_TAG
 WORKDIR /app
 COPY frontend/package.json frontend/yarn.lock frontend/.yarnrc.yml* ./
-RUN corepack enable && yarn install --immutable --network-timeout 1000000
+# Node 25 unbundled corepack, so `corepack enable` is gone from the image.
+# The yarn release is vendored in-repo (see .yarnrc.yml `yarnPath`), so run it
+# with node directly rather than fetching a package manager to fetch packages.
+COPY frontend/.yarn/releases/ .yarn/releases/
+RUN node .yarn/releases/yarn-*.cjs install --immutable --network-timeout 1000000
 COPY frontend/ .
-RUN yarn build
+RUN node .yarn/releases/yarn-*.cjs build
 
 # --- Stage 2: Build workspace dependencies (native, cross-compiled) ---
 #
