@@ -12,6 +12,9 @@ publish = false
 tokio = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+# Seeding a finished book: the real pipeline needs Audible credentials, so
+# tests that exercise the shelf stream write the rows directly.
+rusqlite = { version = "0.40", features = ["bundled"] }
 # Needs the cookie store for the DEV_AUTH session flow, which the workspace
 # reqwest feature set doesn't enable — declare our own here.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies"] }

@@ -1,14 +1,15 @@
+use std::sync::OnceLock;
+
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{header, request, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use futures_util::StreamExt;
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio_util::io::ReaderStream;
+use tower_http::services::ServeFile;
 
 use crate::abs;
 use crate::auth::{bearer_guard, bearer_guard_stream};
@@ -312,7 +313,7 @@ async fn item_detail(
 async fn item_file(
     State(state): State<ShelfState>,
     Path((id, _ino)): Path<(String, String)>,
-    headers: HeaderMap,
+    req: Request,
 ) -> ShelfResult<Response> {
     let (asin, account_id) = parse_item_id(&id)?;
     let asin_q = asin.clone();
@@ -335,7 +336,7 @@ async fn item_file(
         })
         .await?;
     let path = m4b.ok_or(ShelfError::NotFound)?;
-    stream_file_with_range(&path, &headers, "audio/mp4").await
+    serve_file_validated(&path, req, audio_mp4()).await
 }
 
 async fn item_cover(
@@ -804,63 +805,284 @@ fn title_ignore_prefix(title: &str) -> String {
     title.to_string()
 }
 
-async fn stream_file_with_range(
-    path: &str,
-    headers: &HeaderMap,
-    content_type: &str,
-) -> ShelfResult<Response> {
-    let meta = tokio::fs::metadata(path).await.map_err(|_| ShelfError::NotFound)?;
-    let total = meta.len();
-    let range_header = headers
-        .get(header::RANGE)
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string());
-    let mut file = tokio::fs::File::open(path).await.map_err(|_| ShelfError::NotFound)?;
-    if let Some(range) = range_header.as_deref() {
-        if let Some((start, end)) = parse_byte_range(range, total) {
-            file.seek(std::io::SeekFrom::Start(start)).await?;
-            let len = end - start + 1;
-            let limited = file.take(len);
-            let body = Body::from_stream(ReaderStream::new(limited));
-            return Ok((
-                StatusCode::PARTIAL_CONTENT,
-                [
-                    (header::CONTENT_TYPE, content_type.to_string()),
-                    (
-                        header::CONTENT_RANGE,
-                        format!("bytes {start}-{end}/{total}"),
-                    ),
-                    (header::ACCEPT_RANGES, "bytes".to_string()),
-                    (header::CONTENT_LENGTH, len.to_string()),
-                ],
-                body,
-            )
-                .into_response());
-        }
-    }
-    let body = Body::from_stream(ReaderStream::new(file));
-    Ok((
-        [
-            (header::CONTENT_TYPE, content_type.to_string()),
-            (header::CONTENT_LENGTH, total.to_string()),
-            (header::ACCEPT_RANGES, "bytes".to_string()),
-        ],
-        body,
-    )
-        .into_response())
+/// `audio/mp4` — parsed once, since every stream request needs it.
+fn audio_mp4() -> &'static mime::Mime {
+    static M: OnceLock<mime::Mime> = OnceLock::new();
+    M.get_or_init(|| "audio/mp4".parse().expect("static mime literal"))
 }
 
-fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
-    let suffix = value.strip_prefix("bytes=")?;
-    let (start_s, end_s) = suffix.split_once('-')?;
-    let start: u64 = start_s.parse().ok()?;
-    let end: u64 = if end_s.is_empty() {
-        total.saturating_sub(1)
-    } else {
-        end_s.parse().ok()?
-    };
-    if start > end || end >= total {
-        return None;
+/// Serve a file with full RFC 9110 range + validator semantics, by delegating
+/// to tower-http: `Accept-Ranges`, a strong size+mtime `ETag`,
+/// `Last-Modified`, 206 with `Content-Range`, 416 for unsatisfiable ranges,
+/// and the `If-None-Match` / `If-Modified-Since` preconditions. It also
+/// clamps an over-long end byte and accepts suffix ranges (`bytes=-500`)
+/// instead of silently answering 200 with the whole file.
+///
+/// What tower-http does *not* implement is `If-Range`, and this route needs
+/// it. Listen This resumes an interrupted background download by pairing
+/// `Range: bytes=N-` with `If-Range: <validator>`, and a reconvert can replace
+/// the m4b in between. Answering 206 out of the new file would splice two
+/// different encodings into one book — which the client then stores as
+/// complete, because its truncation guard only runs on a fresh 200. So: serve
+/// once, and if that produced a 206 whose validator doesn't match the client's
+/// `If-Range`, re-serve without the `Range`. RFC 9110 §13.1.5 says to ignore
+/// the range and return the whole representation.
+async fn serve_file_validated(
+    path: &str,
+    req: Request,
+    content_type: &mime::Mime,
+) -> ShelfResult<Response> {
+    let mut svc = ServeFile::new_with_mime(path, content_type);
+    // GET/HEAD carry no body, so rebuilding the request from its parts is
+    // lossless — and gives us a second, range-less request to fall back to.
+    let (parts, _) = req.into_parts();
+    // `try_call`, not the Service impl: it hands back genuine io errors (EIO
+    // and friends) instead of swallowing them into a 404, so a NAS that has
+    // gone away reads as a 500. A missing or unreadable file is not in that
+    // set — tower-http answers those with its own bare 404, which we re-raise
+    // below so clients only ever see shelf's JSON error shape.
+    let served = svc
+        .try_call(rebuild_without_body(&parts, true))
+        .await
+        .map_err(ShelfError::from)?;
+    if served.status() == StatusCode::NOT_FOUND {
+        return Err(ShelfError::NotFound);
     }
-    Some((start, end))
+    if served.status() == StatusCode::PARTIAL_CONTENT {
+        if let Some(if_range) = parts.headers.get(header::IF_RANGE) {
+            if !if_range_matches(if_range, served.headers()) {
+                // Dropping `served` drops a file handle whose body was never
+                // polled, so the stale attempt costs one open() and a seek.
+                drop(served);
+                let full = svc
+                    .try_call(rebuild_without_body(&parts, false))
+                    .await
+                    .map_err(ShelfError::from)?;
+                return Ok(full.map(Body::new));
+            }
+        }
+    }
+    Ok(served.map(Body::new))
+}
+
+/// Rebuild a bodyless request from saved parts, optionally dropping `Range`.
+fn rebuild_without_body(parts: &request::Parts, keep_range: bool) -> Request {
+    let mut req = Request::new(Body::empty());
+    *req.method_mut() = parts.method.clone();
+    *req.uri_mut() = parts.uri.clone();
+    *req.headers_mut() = parts.headers.clone();
+    if !keep_range {
+        req.headers_mut().remove(header::RANGE);
+    }
+    req
+}
+
+/// Compare the client's `If-Range` against the validators we just served. A
+/// quoted value is an entity-tag, anything else an HTTP-date. Weak tags
+/// (`W/"…"`) never match — §13.1.5 requires strong comparison — and neither
+/// does a response with no matching validator. Both failures fall to the safe
+/// side: a full 200 rather than a possibly-spliced 206.
+fn if_range_matches(if_range: &HeaderValue, served: &HeaderMap) -> bool {
+    let want = if_range.as_bytes();
+    let name = if want.starts_with(b"\"") {
+        header::ETAG
+    } else {
+        header::LAST_MODIFIED
+    };
+    served.get(name).is_some_and(|v| v.as_bytes() == want)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LEN: usize = 4096;
+
+    /// A deterministic file of [`LEN`] bytes, plus its path.
+    fn fixture() -> (tempfile::TempDir, String, Vec<u8>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bytes: Vec<u8> = (0..LEN).map(|i| (i % 251) as u8).collect();
+        let path = dir.path().join("book.m4b");
+        std::fs::write(&path, &bytes).expect("write fixture");
+        let as_str = path.to_str().expect("utf8 path").to_string();
+        (dir, as_str, bytes)
+    }
+
+    fn get(headers: &[(header::HeaderName, &str)]) -> Request {
+        let mut b = Request::builder().uri("/api/items/acct:ASIN/file/ino-0");
+        for (name, value) in headers {
+            b = b.header(name, *value);
+        }
+        b.body(Body::empty()).expect("build request")
+    }
+
+    async fn serve(path: &str, headers: &[(header::HeaderName, &str)]) -> Response {
+        serve_file_validated(path, get(headers), audio_mp4())
+            .await
+            .expect("serve")
+    }
+
+    fn header_str(resp: &Response, name: header::HeaderName) -> String {
+        resp.headers()
+            .get(&name)
+            .unwrap_or_else(|| panic!("response is missing {name}"))
+            .to_str()
+            .expect("ascii header")
+            .to_string()
+    }
+
+    async fn body_bytes(resp: Response) -> Vec<u8> {
+        axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("read body")
+            .to_vec()
+    }
+
+    /// A plain GET must carry everything URLSession needs before it will even
+    /// produce resume data: Accept-Ranges, a length, and a validator.
+    #[tokio::test]
+    async fn full_response_carries_validators() {
+        let (_dir, path, bytes) = fixture();
+        let resp = serve(&path, &[]).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(header_str(&resp, header::ACCEPT_RANGES), "bytes");
+        assert_eq!(header_str(&resp, header::CONTENT_LENGTH), LEN.to_string());
+        assert_eq!(header_str(&resp, header::CONTENT_TYPE), "audio/mp4");
+        assert!(!header_str(&resp, header::ETAG).is_empty());
+        assert!(!header_str(&resp, header::LAST_MODIFIED).is_empty());
+        assert_eq!(body_bytes(resp).await, bytes);
+    }
+
+    /// The open-ended form URLSession sends when resuming.
+    #[tokio::test]
+    async fn open_ended_range_serves_206_tail() {
+        let (_dir, path, bytes) = fixture();
+        let resp = serve(&path, &[(header::RANGE, "bytes=1000-")]).await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            header_str(&resp, header::CONTENT_RANGE),
+            format!("bytes 1000-{}/{}", LEN - 1, LEN)
+        );
+        assert_eq!(
+            header_str(&resp, header::CONTENT_LENGTH),
+            (LEN - 1000).to_string()
+        );
+        assert_eq!(body_bytes(resp).await, bytes[1000..]);
+    }
+
+    /// A padded end byte used to fall through to a 200 with the whole file —
+    /// i.e. a seek triggered a full re-download. It must clamp to a 206.
+    #[tokio::test]
+    async fn padded_end_is_clamped_not_a_full_download() {
+        let (_dir, path, bytes) = fixture();
+        let resp = serve(&path, &[(header::RANGE, "bytes=0-99999999")]).await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            header_str(&resp, header::CONTENT_RANGE),
+            format!("bytes 0-{}/{}", LEN - 1, LEN)
+        );
+        assert_eq!(body_bytes(resp).await, bytes);
+    }
+
+    /// Suffix ranges also used to fall through to a full 200.
+    #[tokio::test]
+    async fn suffix_range_serves_tail() {
+        let (_dir, path, bytes) = fixture();
+        let resp = serve(&path, &[(header::RANGE, "bytes=-500")]).await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            header_str(&resp, header::CONTENT_RANGE),
+            format!("bytes {}-{}/{}", LEN - 500, LEN - 1, LEN)
+        );
+        assert_eq!(body_bytes(resp).await, bytes[LEN - 500..]);
+    }
+
+    /// Previously answered 200 with the whole file; 416 is the correct reply.
+    #[tokio::test]
+    async fn unsatisfiable_range_is_416() {
+        let (_dir, path, _) = fixture();
+        let resp = serve(&path, &[(header::RANGE, &format!("bytes={LEN}-"))]).await;
+        assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(
+            header_str(&resp, header::CONTENT_RANGE),
+            format!("bytes */{LEN}")
+        );
+    }
+
+    #[tokio::test]
+    async fn if_range_matching_etag_keeps_206() {
+        let (_dir, path, bytes) = fixture();
+        let etag = header_str(&serve(&path, &[]).await, header::ETAG);
+        let resp = serve(&path, &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &etag)]).await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body_bytes(resp).await, bytes[1000..]);
+    }
+
+    /// `If-Range` may also carry an HTTP-date, compared against Last-Modified.
+    #[tokio::test]
+    async fn if_range_matching_last_modified_keeps_206() {
+        let (_dir, path, _) = fixture();
+        let modified = header_str(&serve(&path, &[]).await, header::LAST_MODIFIED);
+        let resp = serve(
+            &path,
+            &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &modified)],
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    }
+
+    /// The corruption guard. A resume whose validator no longer matches must
+    /// get the whole file, not a 206 spliced out of a different encoding —
+    /// the client has no size check on a 206 and would store it as complete.
+    #[tokio::test]
+    async fn stale_if_range_falls_back_to_full_200() {
+        let (_dir, path, bytes) = fixture();
+        let resp = serve(
+            &path,
+            &[
+                (header::RANGE, "bytes=1000-"),
+                (header::IF_RANGE, "\"stale-from-a-previous-convert\""),
+            ],
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(header_str(&resp, header::CONTENT_LENGTH), LEN.to_string());
+        assert!(resp.headers().get(header::CONTENT_RANGE).is_none());
+        assert_eq!(body_bytes(resp).await, bytes);
+    }
+
+    /// Weak tags never satisfy a range precondition (RFC 9110 §13.1.5 wants a
+    /// strong comparison), so a weak `If-Range` also falls back to the full
+    /// representation even when it wraps the current tag.
+    #[tokio::test]
+    async fn weak_if_range_falls_back_to_full_200() {
+        let (_dir, path, _) = fixture();
+        let etag = header_str(&serve(&path, &[]).await, header::ETAG);
+        let weak = format!("W/{etag}");
+        let resp = serve(&path, &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &weak)]).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn if_none_match_is_304() {
+        let (_dir, path, _) = fixture();
+        let etag = header_str(&serve(&path, &[]).await, header::ETAG);
+        let resp = serve(&path, &[(header::IF_NONE_MATCH, &etag)]).await;
+        assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    /// A missing m4b keeps shelf's own JSON 404 rather than tower-http's.
+    #[tokio::test]
+    async fn missing_file_is_not_found() {
+        let (dir, _, _) = fixture();
+        let missing = dir.path().join("nope.m4b");
+        let err = serve_file_validated(
+            missing.to_str().expect("utf8 path"),
+            get(&[]),
+            audio_mp4(),
+        )
+        .await
+        .expect_err("missing file must not serve");
+        assert!(matches!(err, ShelfError::NotFound));
+    }
 }

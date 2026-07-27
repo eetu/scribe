@@ -30,6 +30,8 @@ const SHIM_TOKEN: &str = "smoke-shim-token-0123456789abcdef";
 pub struct Stack {
     children: Vec<Child>,
     _tmp: tempfile::TempDir,
+    db: PathBuf,
+    library_dir: PathBuf,
     pub http: reqwest::Client,
     pub backend: String,
     pub shim: String,
@@ -142,6 +144,8 @@ impl Stack {
 
         Stack {
             children,
+            db,
+            library_dir: t.join("library"),
             _tmp: tmp,
             http,
             backend,
@@ -150,6 +154,61 @@ impl Stack {
             shelf,
             shelf_key: SHELF_KEY.to_string(),
         }
+    }
+
+    /// Seed a finished book into the library tree and the DB, returning
+    /// shelf's item id for it (`<account>:<asin>`).
+    ///
+    /// Producing a book for real needs Audible credentials, so the rows go in
+    /// directly. `item_file` resolves nothing but `jobs.m4b_path`, while the
+    /// library listing joins `books` → `accounts` → `profile` and filters on
+    /// `status = 'done' AND m4b_path IS NOT NULL` — so seeding the whole chain
+    /// makes the item genuinely reachable rather than only byte-addressable.
+    pub fn seed_m4b(&self, account: &str, asin: &str, bytes: &[u8]) -> String {
+        let path = self.library_dir.join(format!("{asin}.m4b"));
+        std::fs::write(&path, bytes).expect("write m4b");
+
+        let c = rusqlite::Connection::open(&self.db).expect("open db");
+        // The backend holds the same file in WAL mode; wait rather than fail
+        // if it happens to be mid-write.
+        c.busy_timeout(Duration::from_secs(5)).expect("busy_timeout");
+        let now = "2026-01-01T00:00:00Z";
+        // INSERT OR IGNORE throughout so a test can seed several books.
+        c.execute(
+            "INSERT OR IGNORE INTO profile (id, user_sub, email, created_at)
+             VALUES (1, 'seed-sub', 'seed@example.invalid', ?1)",
+            rusqlite::params![now],
+        )
+        .expect("seed profile");
+        c.execute(
+            "INSERT OR IGNORE INTO accounts (id, profile_id, locale, email_masked)
+             VALUES (?1, 1, 'us', 's***@example.invalid')",
+            rusqlite::params![account],
+        )
+        .expect("seed account");
+        c.execute(
+            "INSERT OR IGNORE INTO books
+               (asin, account_id, title, authors_json, narrators_json, status, first_seen_at)
+             VALUES (?1, ?2, 'Seeded Book', '[\"Seed Author\"]', '[\"Seed Narrator\"]',
+                     'Active', ?3)",
+            rusqlite::params![asin, account, now],
+        )
+        .expect("seed book");
+        c.execute(
+            "INSERT OR IGNORE INTO jobs
+               (id, asin, account_id, status, created_at, updated_at, m4b_path)
+             VALUES (?1, ?2, ?3, 'done', ?4, ?4, ?5)",
+            rusqlite::params![
+                format!("seed-{account}-{asin}"),
+                asin,
+                account,
+                now,
+                path.to_str().expect("utf8 path")
+            ],
+        )
+        .expect("seed job");
+
+        format!("{account}:{asin}")
     }
 
     /// GET a URL and parse the JSON body. Panics on transport/parse error.

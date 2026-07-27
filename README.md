@@ -213,11 +213,22 @@ Endpoints implemented (the subset that Listen This consumes):
 | `GET /api/libraries` | single library entry derived from `SHELF_LIBRARY_NAME` |
 | `GET /api/libraries/{id}/items` | paginated, supports `?search=` |
 | `GET /api/items/{id}?expanded=1` | metadata + single synthesized track |
-| `GET /api/items/{id}/file/{ino}` | Range-aware m4b stream from `SHELF_LIBRARY_DIR` |
+| `GET /api/items/{id}/file/{ino}` | resumable m4b stream from `SHELF_LIBRARY_DIR` |
 | `GET /api/items/{id}/cover` | proxies the Audible CDN cover URL, 24h cache |
 
 `item_id` is `<account_id>:<asin>` so US + UK editions of the same book
 stay distinct. `ino` is a stable hash of the ASIN — opaque to clients.
+
+The stream route is **resumable**, which is a stricter contract than
+range-aware: a client that loses its connection mid-download has to be able
+to pick up where it stopped instead of re-fetching a few hundred MB. That
+needs all four of `Accept-Ranges`, an accurate `Content-Length`, 206 +
+`Content-Range` for a `Range` request, and a stable validator (`ETag` +
+`Last-Modified`) — iOS's `URLSession` discards its resume data if the
+validator is missing, and restarts from byte 0. `If-Range` is honoured too:
+if a reconvert replaced the m4b since the interrupted attempt, the resume
+gets the whole new file rather than a 206 spliced across two encodings.
+Served by `tower-http`'s `ServeFile`, so 416 and 304 come along as well.
 
 scribe's settings page surfaces the URL + API key as copy-able fields
 when both `SCRIBE_SHELF_URL` and `SCRIBE_SHELF_API_KEY` are set on the

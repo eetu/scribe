@@ -9,6 +9,7 @@ axum = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tower-http = { workspace = true }
+mime = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { workspace = true }
@@ -22,3 +23,6 @@ dotenvy = { workspace = true }
 chrono = { workspace = true }
 subtle = "2"
 url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

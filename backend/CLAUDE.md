@@ -6,24 +6,37 @@ orchestrates scribe-press (HTTP+bearer; co-located or a separate LAN host) for f
 
 ## Routes
 
+Mirrors `router()` in `src/routes.rs` — keep them in step.
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/status` | upstream health (shim + press), version |
+| GET | `/status` | upstream health (shim + press + shelf), version, auth flags |
 | GET | `/auth/login` | OIDC start (or DEV_AUTH cookie set) |
 | GET | `/auth/callback` | OIDC return |
 | POST | `/auth/logout` | clear session |
 | GET | `/api/me` | session probe |
+| GET PATCH | `/api/settings` | per-profile settings read / partial update |
+| DELETE | `/api/settings/{key}` | reset one setting to its default |
 | GET | `/api/accounts` | proxy GET shim /accounts |
 | POST | `/api/accounts/login/start` | proxy POST shim /login/start |
 | POST | `/api/accounts/login/finish` | proxy POST shim /login/finish |
+| POST | `/api/accounts/{id}/refresh` | re-sync one Audible account |
+| POST | `/api/accounts/{id}/deregister` | drop the account + its shim credentials |
 | GET | `/api/library` | union of all accounts' books, joined with job state |
-| POST | `/api/library/sync` | manual refresh trigger |
+| POST | `/api/library/sync` | manual refresh trigger (full paginated walk) |
+| POST | `/api/library/reconcile` | reconcile DB against what's on the NAS |
+| POST | `/api/library/refresh` | re-fetch metadata for the whole library |
+| DELETE | `/api/books/{asin}` | remove book + tombstone it in `removed_books` |
+| GET | `/api/books/{asin}/cover` | cached cover bytes, ETag + 304 |
+| POST | `/api/books/{asin}/refresh` | re-fetch metadata for one book |
 | GET | `/api/jobs` | recent jobs + active queue |
 | POST | `/api/jobs` | enqueue download of a specific asin |
+| POST | `/api/jobs/enqueue_all` | queue every Active book with no job row |
 | GET | `/api/jobs/{id}/sse` | per-job progress stream |
 | POST | `/api/jobs/{id}/cancel` | stop / dequeue |
-| GET | `/api/reorg/preview` | walk NAS, propose renames |
-| POST | `/api/reorg/commit` | apply selected renames |
+| POST | `/api/jobs/{id}/reconvert` | re-run ffmpeg from the kept original |
+| GET | `/internal/aaxc/{token}` | local AAXC bytes for press; one-shot path token, no session. Range-aware (206 + `Content-Range`) because press sizes the file with a `bytes=0-0` probe |
+| * | anything else | SPA fallback — `ServeDir` over `STATIC_DIR`, `index.html` for unknown paths |
 
 ## SQLite schema (initial)
 
@@ -166,8 +179,12 @@ machinery that was already torn out.
 | `SCRIBE_SHIM_TOKEN` | unset | optional shared-secret bearer for the shim (matches shim's `SHIM_TOKEN`); defense-in-depth over the loopback bind |
 | `SCRIBE_PRESS_URL` | unset | press worker base URL (loopback if co-located, else its LAN URL) |
 | `SCRIBE_PRESS_TOKEN` | unset | bearer for press auth |
+| `SCRIBE_SHELF_URL` | unset | shelf base URL; unset = shelf status hidden in the UI |
+| `SCRIBE_SHELF_API_KEY` | unset | shelf bearer key, surfaced on the settings page for clients to copy |
+| `SCRIBE_INTERNAL_URL` | unset | base URL press should call back on for `/internal/aaxc/{token}` |
 | `SCRIBE_LIBRARY_DIR` | `/mnt/audiobooks/library` | M4B output root |
 | `SCRIBE_ORIGINAL_DIR` | `/mnt/audiobooks/original` | untouched AAXC/AAX downloads from Audible |
+| `SCRIBE_COVERS_DIR` | `covers` | cached cover bytes (container sets `/data/covers`) |
 | `SCRIBE_POLL_INTERVAL_MIN` | `60` | base poll cadence in minutes |
 | `SCRIBE_POLL_JITTER_PERCENT` | `50` | uniform ± randomness on each interval |
 | `SCRIBE_POLL_ACTIVE_HOUR_START` | `7` | poll window start (local hour 0-23) |
