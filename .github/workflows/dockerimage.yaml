@@ -4,6 +4,12 @@ on:
   push:
     branches: ["main"]
     tags: ["v*"]
+  # Dockerfile-touching PRs build (without pushing) so a broken image build
+  # fails its own PR. The other CI jobs can't catch this class: they run on
+  # the GitHub runner, not in the image, so a base-image bump that removes a
+  # tool or drops a wheel platform stayed green through automerge and only
+  # went red on main afterwards.
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -29,10 +35,13 @@ jobs:
 
       - name: Detect build-relevant changes
         id: filter
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
         with:
           filters: |
+            dockerfile:
+              - 'Dockerfile'
+              - '.github/workflows/dockerimage.yaml'
             backend:
               - 'backend/**'
               - 'frontend/**'
@@ -69,6 +78,16 @@ jobs:
             echo "shim=true" >> "$GITHUB_OUTPUT"
             echo "press=true" >> "$GITHUB_OUTPUT"
             echo "shelf=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # A PR only builds images when the Dockerfile (or this workflow)
+            # changed — that's the sole input the other jobs don't cover. When
+            # it did change, build all four: any stage can break, and the one
+            # that broke last was not the one being edited.
+            d="${{ steps.filter.outputs.dockerfile }}"
+            echo "backend=$d" >> "$GITHUB_OUTPUT"
+            echo "shim=$d" >> "$GITHUB_OUTPUT"
+            echo "press=$d" >> "$GITHUB_OUTPUT"
+            echo "shelf=$d" >> "$GITHUB_OUTPUT"
           else
             echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
             echo "shim=${{ steps.filter.outputs.shim }}" >> "$GITHUB_OUTPUT"
@@ -86,8 +105,9 @@ jobs:
         if: steps.gate.outputs.backend == 'true' || steps.gate.outputs.shim == 'true' || steps.gate.outputs.press == 'true' || steps.gate.outputs.shelf == 'true'
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
+      # PR builds never push, so they don't need registry credentials either.
       - name: Log in to the Container registry
-        if: steps.gate.outputs.backend == 'true' || steps.gate.outputs.shim == 'true' || steps.gate.outputs.press == 'true' || steps.gate.outputs.shelf == 'true'
+        if: github.event_name != 'pull_request' && (steps.gate.outputs.backend == 'true' || steps.gate.outputs.shim == 'true' || steps.gate.outputs.press == 'true' || steps.gate.outputs.shelf == 'true')
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -113,7 +133,7 @@ jobs:
         with:
           context: .
           target: runner
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_backend.outputs.tags }}
           labels: ${{ steps.meta_backend.outputs.labels }}
           build-args: |
@@ -144,7 +164,7 @@ jobs:
         with:
           context: .
           target: shim-runner
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_shim.outputs.tags }}
           labels: ${{ steps.meta_shim.outputs.labels }}
           platforms: linux/arm64
@@ -170,7 +190,7 @@ jobs:
         with:
           context: .
           target: press-runner
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_press.outputs.tags }}
           labels: ${{ steps.meta_press.outputs.labels }}
           platforms: linux/arm64
@@ -196,7 +216,7 @@ jobs:
         with:
           context: .
           target: shelf-runner
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_shelf.outputs.tags }}
           labels: ${{ steps.meta_shelf.outputs.labels }}
           platforms: linux/arm64
@@ -205,8 +225,9 @@ jobs:
 
       # Prune untagged versions for each package. One delete-package
       # step per image so each one's history is independently trimmed.
+      # Nothing was pushed on a PR, so there is nothing to prune.
       - name: Prune untagged backend image versions
-        if: steps.gate.outputs.backend == 'true'
+        if: github.event_name != 'pull_request' && steps.gate.outputs.backend == 'true'
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: scribe
@@ -215,7 +236,7 @@ jobs:
           min-versions-to-keep: 5
 
       - name: Prune untagged shim image versions
-        if: steps.gate.outputs.shim == 'true'
+        if: github.event_name != 'pull_request' && steps.gate.outputs.shim == 'true'
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: scribe-shim
@@ -224,7 +245,7 @@ jobs:
           min-versions-to-keep: 5
 
       - name: Prune untagged press image versions
-        if: steps.gate.outputs.press == 'true'
+        if: github.event_name != 'pull_request' && steps.gate.outputs.press == 'true'
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: scribe-press
@@ -233,7 +254,7 @@ jobs:
           min-versions-to-keep: 5
 
       - name: Prune untagged shelf image versions
-        if: steps.gate.outputs.shelf == 'true'
+        if: github.event_name != 'pull_request' && steps.gate.outputs.shelf == 'true'
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: scribe-shelf

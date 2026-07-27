@@ -156,7 +156,11 @@ CMD ["./scribe-shelf"]
 # Shim is Pi-side too. Keeps mkb79/audible's Python deps isolated from the
 # Rust backend so a rotting Audible auth flow swap doesn't force the Rust
 # image to rebuild.
-FROM python:3.15.0b3-slim AS shim-runner
+# Stay on a stable interpreter: cffi (via audible → cryptography) publishes
+# aarch64 wheels up to cp314 and none for cp315, so a 3.15 base makes uv build
+# it from sdist and the slim image has no gcc. Don't bump past 3.14 until the
+# wheels exist — see the cffi entry in shim/uv.lock for the available tags.
+FROM python:3.14-slim AS shim-runner
 WORKDIR /app
 LABEL org.opencontainers.image.description="scribe-shim — Audible auth + library + voucher sidecar"
 LABEL org.opencontainers.image.source="https://github.com/eetu/scribe"
