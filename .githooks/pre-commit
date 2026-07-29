@@ -18,6 +18,11 @@ fi
 # workspace — any Rust touch runs workspace-wide clippy. Cheap with the dep
 # cache warm.
 if echo "$STAGED" | grep -qE "^(backend|press|shared|shelf|e2e)/|^Cargo\.(toml|lock)$"; then
+  # --check, not a rewrite: `cargo fmt` would reformat the working tree
+  # without staging it, so the commit would still carry unformatted code.
+  # Fail instead and let the author run `cargo fmt --all`.
+  echo "→ cargo fmt --check..."
+  (cd "$ROOT" && cargo fmt --all -- --check)
   echo "→ cargo clippy --workspace..."
   (cd "$ROOT" && cargo clippy --workspace --all-targets -- -D warnings)
 fi
