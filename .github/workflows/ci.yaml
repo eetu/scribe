@@ -35,9 +35,9 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # Workspace lives at the repo root; backend, press and shared
-          # are members. Caching the root target/ dir gives one cache
-          # across all three crates.
+          # Workspace lives at the repo root; backend, press, shared, shelf
+          # and e2e are members. Caching the root target/ dir gives one
+          # cache across all five crates.
           workspaces: "."
       # Ahead of clippy: needs no build, so a formatting slip fails in
       # seconds rather than after a full workspace check.
