@@ -55,7 +55,14 @@ updates:
           - "minor"
           - "patch"
 
-  - package-ecosystem: "pip"
+  # `uv`, not `pip`: shim is a uv project, and the pip ecosystem has no concept
+  # of uv.lock — it edits the constraint in pyproject.toml and stops. That's how
+  # the lockfile drifted behind the manifest for weeks (#92, #93, #85, #106 are
+  # each a manifest-only commit), invisibly, because every consumer runs
+  # `uv sync --frozen`, which installs what the lock says without checking it
+  # still satisfies pyproject. The uv ecosystem regenerates the lockfile in the
+  # same job, so manifest and lock move together.
+  - package-ecosystem: "uv"
     directory: "/shim"
     schedule:
       interval: "weekly"
