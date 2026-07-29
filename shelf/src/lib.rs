@@ -37,7 +37,11 @@ pub async fn run() -> anyhow::Result<()> {
     let http = reqwest::Client::builder()
         .user_agent(concat!("scribe-shelf/", env!("CARGO_PKG_VERSION")))
         .build()?;
-    let state = ShelfState { cfg: cfg.clone(), db, http };
+    let state = ShelfState {
+        cfg: cfg.clone(),
+        db,
+        http,
+    };
 
     let app = routes::router(state);
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;

@@ -28,7 +28,8 @@ pub fn sidecar_path_for(aaxc_path: &Path) -> std::path::PathBuf {
 
 pub async fn write(aaxc_path: &Path, sidecar: &Sidecar) -> Result<(), AppError> {
     let path = sidecar_path_for(aaxc_path);
-    let bytes = serde_json::to_vec_pretty(sidecar).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    let bytes =
+        serde_json::to_vec_pretty(sidecar).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await

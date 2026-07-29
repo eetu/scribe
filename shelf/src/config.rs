@@ -29,13 +29,12 @@ impl Config {
         let library_dir = env::var("SHELF_LIBRARY_DIR")
             .unwrap_or_else(|_| "/mnt/audiobooks/audible/books".into())
             .into();
-        let api_key = env::var("SHELF_API_KEY")
-            .map_err(|_| anyhow::anyhow!("SHELF_API_KEY required"))?;
+        let api_key =
+            env::var("SHELF_API_KEY").map_err(|_| anyhow::anyhow!("SHELF_API_KEY required"))?;
         if api_key.is_empty() {
             anyhow::bail!("SHELF_API_KEY must not be empty");
         }
-        let library_name =
-            env::var("SHELF_LIBRARY_NAME").unwrap_or_else(|_| "Audiobooks".into());
+        let library_name = env::var("SHELF_LIBRARY_NAME").unwrap_or_else(|_| "Audiobooks".into());
         let covers_dir = env::var("SHELF_COVERS_DIR")
             .unwrap_or_else(|_| "/data/covers".into())
             .into();

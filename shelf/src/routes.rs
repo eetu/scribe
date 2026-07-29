@@ -325,7 +325,7 @@ async fn item_detail(
                         m4b_path: r.get::<_, Option<String>>(12)?,
                         aaxc_path: r.get::<_, Option<String>>(13)?,
                         status: r.get::<_, Option<String>>(14)?,
-                    chapters_json: r.get::<_, Option<String>>(15)?,
+                        chapters_json: r.get::<_, Option<String>>(15)?,
                     })
                 })
                 .map(Some)
@@ -1053,7 +1053,11 @@ mod tests {
     async fn if_range_matching_etag_keeps_206() {
         let (_dir, path, bytes) = fixture();
         let etag = header_str(&serve(&path, &[]).await, header::ETAG);
-        let resp = serve(&path, &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &etag)]).await;
+        let resp = serve(
+            &path,
+            &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &etag)],
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(body_bytes(resp).await, bytes[1000..]);
     }
@@ -1065,7 +1069,10 @@ mod tests {
         let modified = header_str(&serve(&path, &[]).await, header::LAST_MODIFIED);
         let resp = serve(
             &path,
-            &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &modified)],
+            &[
+                (header::RANGE, "bytes=1000-"),
+                (header::IF_RANGE, &modified),
+            ],
         )
         .await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
@@ -1099,7 +1106,11 @@ mod tests {
         let (_dir, path, _) = fixture();
         let etag = header_str(&serve(&path, &[]).await, header::ETAG);
         let weak = format!("W/{etag}");
-        let resp = serve(&path, &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &weak)]).await;
+        let resp = serve(
+            &path,
+            &[(header::RANGE, "bytes=1000-"), (header::IF_RANGE, &weak)],
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
@@ -1116,13 +1127,9 @@ mod tests {
     async fn missing_file_is_not_found() {
         let (dir, _, _) = fixture();
         let missing = dir.path().join("nope.m4b");
-        let err = serve_file_validated(
-            missing.to_str().expect("utf8 path"),
-            get(&[]),
-            audio_mp4(),
-        )
-        .await
-        .expect_err("missing file must not serve");
+        let err = serve_file_validated(missing.to_str().expect("utf8 path"), get(&[]), audio_mp4())
+            .await
+            .expect_err("missing file must not serve");
         assert!(matches!(err, ShelfError::NotFound));
     }
 }

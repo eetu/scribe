@@ -171,7 +171,8 @@ impl Stack {
         let c = rusqlite::Connection::open(&self.db).expect("open db");
         // The backend holds the same file in WAL mode; wait rather than fail
         // if it happens to be mid-write.
-        c.busy_timeout(Duration::from_secs(5)).expect("busy_timeout");
+        c.busy_timeout(Duration::from_secs(5))
+            .expect("busy_timeout");
         let now = "2026-01-01T00:00:00Z";
         // INSERT OR IGNORE throughout so a test can seed several books.
         c.execute(
@@ -219,7 +220,13 @@ impl Stack {
 
     /// GET a URL and return just the status code.
     pub async fn code(&self, url: &str) -> u16 {
-        self.http.get(url).send().await.expect("request").status().as_u16()
+        self.http
+            .get(url)
+            .send()
+            .await
+            .expect("request")
+            .status()
+            .as_u16()
     }
 }
 

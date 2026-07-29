@@ -123,8 +123,12 @@ async fn tick(state: &AppState) -> anyhow::Result<()> {
                 let auto = auto_enqueue_for(state, profile_id).await;
                 if auto {
                     match state.queue().enqueue_pending(&acct).await {
-                        Ok(ids) => tracing::info!(account = %acct, queued = ids.len(), "auto-enqueued"),
-                        Err(e) => tracing::warn!(account = %acct, error = ?e, "auto-enqueue failed"),
+                        Ok(ids) => {
+                            tracing::info!(account = %acct, queued = ids.len(), "auto-enqueued")
+                        }
+                        Err(e) => {
+                            tracing::warn!(account = %acct, error = ?e, "auto-enqueue failed")
+                        }
                     }
                 }
             }
@@ -259,7 +263,8 @@ async fn list_accounts_with_profile(state: &AppState) -> anyhow::Result<Vec<(Str
     let rows = state
         .db
         .with(|c| {
-            let mut stmt = c.prepare("SELECT id, profile_id FROM accounts WHERE profile_id IS NOT NULL")?;
+            let mut stmt =
+                c.prepare("SELECT id, profile_id FROM accounts WHERE profile_id IS NOT NULL")?;
             let rows = stmt
                 .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

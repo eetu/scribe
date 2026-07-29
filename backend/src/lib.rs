@@ -15,8 +15,8 @@ pub mod queue;
 pub mod reconcile;
 pub mod reconvert;
 pub mod routes;
-pub mod sidecar;
 pub mod shim;
+pub mod sidecar;
 pub mod state;
 pub mod sync;
 pub mod util;
@@ -62,7 +62,8 @@ pub async fn run_server() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,scribe_backend=debug")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,scribe_backend=debug")),
         )
         .init();
 

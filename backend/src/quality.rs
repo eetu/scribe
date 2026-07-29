@@ -143,8 +143,10 @@ pub fn probe(path: &Path) -> anyhow::Result<Quality> {
         pos = pe;
     };
 
-    let (mdia_s, mdia_e) = find(&moov, trak_s, trak_e, b"mdia").ok_or_else(|| anyhow::anyhow!("no mdia"))?;
-    let (mdhd_s, mdhd_e) = find(&moov, mdia_s, mdia_e, b"mdhd").ok_or_else(|| anyhow::anyhow!("no mdhd"))?;
+    let (mdia_s, mdia_e) =
+        find(&moov, trak_s, trak_e, b"mdia").ok_or_else(|| anyhow::anyhow!("no mdia"))?;
+    let (mdhd_s, mdhd_e) =
+        find(&moov, mdia_s, mdia_e, b"mdhd").ok_or_else(|| anyhow::anyhow!("no mdhd"))?;
     if mdhd_e < mdhd_s + 24 {
         anyhow::bail!("short mdhd");
     }
@@ -167,11 +169,14 @@ pub fn probe(path: &Path) -> anyhow::Result<Quality> {
         anyhow::bail!("zero mdhd timescale/duration");
     }
 
-    let (minf_s, minf_e) = find(&moov, mdia_s, mdia_e, b"minf").ok_or_else(|| anyhow::anyhow!("no minf"))?;
-    let (stbl_s, stbl_e) = find(&moov, minf_s, minf_e, b"stbl").ok_or_else(|| anyhow::anyhow!("no stbl"))?;
+    let (minf_s, minf_e) =
+        find(&moov, mdia_s, mdia_e, b"minf").ok_or_else(|| anyhow::anyhow!("no minf"))?;
+    let (stbl_s, stbl_e) =
+        find(&moov, minf_s, minf_e, b"stbl").ok_or_else(|| anyhow::anyhow!("no stbl"))?;
 
     // stsd: version/flags(4) + entry_count(4) + first sample entry box.
-    let (stsd_s, stsd_e) = find(&moov, stbl_s, stbl_e, b"stsd").ok_or_else(|| anyhow::anyhow!("no stsd"))?;
+    let (stsd_s, stsd_e) =
+        find(&moov, stbl_s, stbl_e, b"stsd").ok_or_else(|| anyhow::anyhow!("no stsd"))?;
     let entry = stsd_s + 8;
     if entry + 36 > stsd_e {
         anyhow::bail!("short stsd entry");
@@ -185,7 +190,8 @@ pub fn probe(path: &Path) -> anyhow::Result<Quality> {
     let sample_rate = be_u16(&moov, entry + 32) as u32; // integer part of 16.16
 
     // stsz: version/flags(4) + sample_size(4) + sample_count(4) + [sizes].
-    let (stsz_s, stsz_e) = find(&moov, stbl_s, stbl_e, b"stsz").ok_or_else(|| anyhow::anyhow!("no stsz"))?;
+    let (stsz_s, stsz_e) =
+        find(&moov, stbl_s, stbl_e, b"stsz").ok_or_else(|| anyhow::anyhow!("no stsz"))?;
     if stsz_e < stsz_s + 12 {
         anyhow::bail!("short stsz");
     }
@@ -198,7 +204,9 @@ pub fn probe(path: &Path) -> anyhow::Result<Quality> {
         if table + count * 4 > stsz_e {
             anyhow::bail!("stsz table truncated");
         }
-        (0..count).map(|i| be_u32(&moov, table + i * 4) as u64).sum()
+        (0..count)
+            .map(|i| be_u32(&moov, table + i * 4) as u64)
+            .sum()
     };
 
     let dur_sec = duration as f64 / timescale as f64;

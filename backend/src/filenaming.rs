@@ -81,8 +81,7 @@ impl Templates {
     /// Originals keep the same hierarchy so each `.aaxc`/`.aax` sits next
     /// to whatever folder structure would have housed the M4B — easy to
     /// locate the source if a re-convert is ever needed.
-    pub const DEFAULT_ORIGINAL: &'static str =
-        "{author?}/{series_title?}/{title}-{asin}.aaxc";
+    pub const DEFAULT_ORIGINAL: &'static str = "{author?}/{series_title?}/{title}-{asin}.aaxc";
 
     pub fn from_env() -> Self {
         Self {
@@ -166,7 +165,11 @@ where
         key.push(k);
     }
     let optional = key.ends_with('?');
-    let real_key = if optional { &key[..key.len() - 1] } else { key.as_str() };
+    let real_key = if optional {
+        &key[..key.len() - 1]
+    } else {
+        key.as_str()
+    };
     let value = resolve(real_key, input);
     if value.is_empty() {
         Placeholder::Empty { optional }
@@ -316,7 +319,10 @@ mod tests {
         let andy = ["Andy Weir".to_string()];
         s.authors = &andy;
         let p = library_path(std::path::Path::new("/lib"), Templates::DEFAULT_LIBRARY, &s);
-        assert_eq!(p.to_str().unwrap(), "/lib/Andy Weir/Project Hail Mary/Project Hail Mary.m4b");
+        assert_eq!(
+            p.to_str().unwrap(),
+            "/lib/Andy Weir/Project Hail Mary/Project Hail Mary.m4b"
+        );
     }
 
     #[test]
@@ -364,7 +370,10 @@ mod tests {
         // No authors: {author} expands to empty -> author segment drops.
         let p = library_path(std::path::Path::new("/lib"), Templates::DEFAULT_LIBRARY, &s);
         // Should fall through to title-only path.
-        assert_eq!(p.to_str().unwrap(), "/lib/Project Hail Mary/Project Hail Mary.m4b");
+        assert_eq!(
+            p.to_str().unwrap(),
+            "/lib/Project Hail Mary/Project Hail Mary.m4b"
+        );
     }
 
     #[test]

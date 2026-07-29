@@ -131,8 +131,8 @@ pub async fn fetch_and_store(
         }
         bytes.extend_from_slice(&chunk);
     }
-    let ext = sniff_ext(&bytes)
-        .ok_or_else(|| anyhow::anyhow!("cover payload not a known image type"))?;
+    let ext =
+        sniff_ext(&bytes).ok_or_else(|| anyhow::anyhow!("cover payload not a known image type"))?;
 
     // Clear other-extension leftovers for this asin.
     for old in KNOWN_EXTS.iter().filter(|e| **e != ext) {
@@ -257,10 +257,14 @@ mod tests {
     #[test]
     fn rejects_internal_and_other_hosts() {
         assert!(!cover_host_allowed("https://127.0.0.1/x.jpg"));
-        assert!(!cover_host_allowed("https://169.254.169.254/latest/meta-data"));
+        assert!(!cover_host_allowed(
+            "https://169.254.169.254/latest/meta-data"
+        ));
         assert!(!cover_host_allowed("https://evil.com/x.jpg"));
         // suffix-spoof attempt: not a real amazon subdomain.
-        assert!(!cover_host_allowed("https://media-amazon.com.evil.com/x.jpg"));
+        assert!(!cover_host_allowed(
+            "https://media-amazon.com.evil.com/x.jpg"
+        ));
         assert!(!cover_host_allowed("file:///etc/passwd"));
     }
 }

@@ -43,10 +43,18 @@ pub struct JobSpec {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobEvent {
     Queued,
-    Downloading { bytes_done: u64, bytes_total: Option<u64> },
-    Converting { seconds_done: u64, seconds_total: Option<u64> },
+    Downloading {
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+    },
+    Converting {
+        seconds_done: u64,
+        seconds_total: Option<u64>,
+    },
     Ready,
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

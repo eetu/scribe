@@ -159,7 +159,10 @@ impl<'a> PressClient<'a> {
         job_id: Uuid,
         artifact: Artifact,
         dest: &Path,
-        progress: Option<(&tokio::sync::broadcast::Sender<crate::queue::QueueEvent>, &str)>,
+        progress: Option<(
+            &tokio::sync::broadcast::Sender<crate::queue::QueueEvent>,
+            &str,
+        )>,
     ) -> Result<u64, AppError> {
         let url = format!(
             "{}/jobs/{}/{}",

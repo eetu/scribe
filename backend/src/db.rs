@@ -48,7 +48,10 @@ impl Db {
         })
     }
 
-    pub async fn with<R>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<R>) -> rusqlite::Result<R> {
+    pub async fn with<R>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<R>,
+    ) -> rusqlite::Result<R> {
         let guard = self.inner.lock().await;
         f(&guard)
     }
@@ -102,8 +105,9 @@ impl Db {
         // /metadata (Flat) boot backfill repopulates every book correctly.
         // Gated on the prior user_version so it runs a single time; if it's
         // ever skipped, `POST /api/library/refresh` forces the same re-fetch.
-        let prev_version: i64 =
-            conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap_or(0);
+        let prev_version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap_or(0);
         if prev_version < 6 {
             conn.execute("UPDATE books SET chapters_json = NULL", [])?;
         }
@@ -123,7 +127,10 @@ fn add_column_if_missing(
     decl: &str,
 ) -> anyhow::Result<()> {
     if !column_exists(conn, table, column)? {
-        conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"), [])?;
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
+            [],
+        )?;
     }
     Ok(())
 }
@@ -224,4 +231,3 @@ CREATE TABLE IF NOT EXISTS removed_books (
   PRIMARY KEY (asin, account_id)
 );
 "#;
-

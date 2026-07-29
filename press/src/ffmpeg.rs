@@ -51,7 +51,11 @@ async fn set_phase(state: &Arc<Mutex<JobState>>, phase: Phase) {
     s.phase = phase;
 }
 
-async fn fetch(state: &Arc<Mutex<JobState>>, url: &str, dest: &std::path::Path) -> anyhow::Result<u64> {
+async fn fetch(
+    state: &Arc<Mutex<JobState>>,
+    url: &str,
+    dest: &std::path::Path,
+) -> anyhow::Result<u64> {
     if let Some(local) = url.strip_prefix("file://") {
         return copy_local(state, std::path::Path::new(local), dest).await;
     }
@@ -77,7 +81,11 @@ async fn copy_local(
     Ok(bytes)
 }
 
-async fn download_http(state: &Arc<Mutex<JobState>>, url: &str, dest: &std::path::Path) -> anyhow::Result<u64> {
+async fn download_http(
+    state: &Arc<Mutex<JobState>>,
+    url: &str,
+    dest: &std::path::Path,
+) -> anyhow::Result<u64> {
     let client = reqwest::Client::builder()
         .user_agent("Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0")
         .build()?;
@@ -181,12 +189,15 @@ async fn run_ffmpeg(
         }
     };
     cmd.arg("-metadata").arg(format!("title={}", req.title));
-    cmd.arg("-metadata").arg(format!("artist={}", req.authors.join(", ")));
-    cmd.arg("-metadata").arg(format!("album_artist={}", req.authors.join(", ")));
+    cmd.arg("-metadata")
+        .arg(format!("artist={}", req.authors.join(", ")));
+    cmd.arg("-metadata")
+        .arg(format!("album_artist={}", req.authors.join(", ")));
     // Identity tag so scribe can recognise its own files after a DB wipe
     // (sidecar JSON is the primary source, this is the lifeboat).
     cmd.arg("-metadata").arg(format!("asin={}", req.asin));
-    cmd.arg("-metadata").arg(format!("source=scribe/{}", env!("CARGO_PKG_VERSION")));
+    cmd.arg("-metadata")
+        .arg(format!("source=scribe/{}", env!("CARGO_PKG_VERSION")));
     if !req.narrators.is_empty() {
         // Audiobookshelf + Apple Books convention: composer holds the narrator.
         cmd.arg("-metadata")
@@ -199,7 +210,9 @@ async fn run_ffmpeg(
         cmd.arg("-metadata").arg(format!("track={seq}"));
     }
     cmd.args(["-f", mp4_format]).arg(output);
-    cmd.stdout(Stdio::null()).stderr(Stdio::piped()).stdin(Stdio::null());
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
 
     let mut child = cmd.spawn()?;
 
@@ -219,8 +232,7 @@ async fn run_ffmpeg(
     let progress_state = state.clone();
     let progress_path = output.to_path_buf();
     let progress = tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(std::time::Duration::from_millis(500));
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
         loop {
             interval.tick().await;
             let Ok(meta) = tokio::fs::metadata(&progress_path).await else {
@@ -247,7 +259,9 @@ async fn run_ffmpeg(
             let mut s = state.lock().await;
             s.phase = Phase::Failed;
             s.error = Some(msg.clone());
-            let _ = s.events.send(JobEvent::Failed { message: msg.clone() });
+            let _ = s.events.send(JobEvent::Failed {
+                message: msg.clone(),
+            });
         }
         anyhow::bail!(msg);
     }

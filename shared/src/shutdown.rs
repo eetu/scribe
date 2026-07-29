@@ -99,7 +99,9 @@ async fn wait_for_signal() -> &'static str {
 
 #[cfg(not(unix))]
 async fn wait_for_signal() -> &'static str {
-    tokio::signal::ctrl_c().await.expect("install ctrl-c handler");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("install ctrl-c handler");
     "ctrl-c"
 }
 
