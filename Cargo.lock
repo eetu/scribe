@@ -27,17 +27,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "async-trait"
-version = "0.1.91"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.3",
-]
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1956,10 +1945,8 @@ name = "scribe-backend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "axum",
  "axum-extra",
- "base64 0.22.1",
  "bytes",
  "chrono",
  "dotenvy",
@@ -1978,7 +1965,6 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
- "tokio-util",
  "tower",
  "tower-http 0.7.0",
  "tracing",
@@ -2005,7 +1991,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "axum-extra",
  "bytes",
  "dotenvy",
  "futures-util",
@@ -2014,12 +1999,9 @@ dependencies = [
  "scribe-shared",
  "serde",
  "serde_json",
- "thiserror 2.0.19",
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tower",
- "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2031,7 +2013,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "uuid",
@@ -2056,7 +2037,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
- "tokio-util",
  "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",

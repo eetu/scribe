@@ -7,7 +7,6 @@ edition.workspace = true
 scribe-shared = { path = "../shared" }
 axum = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 tower-http = { workspace = true }
 mime = { workspace = true }
 reqwest = { workspace = true }
