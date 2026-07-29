@@ -65,11 +65,12 @@ an operational choice, not a hard requirement.
 
 ```
 scribe/
-├── Cargo.toml             workspace (backend, press, shared, shelf)
+├── Cargo.toml             workspace (backend, press, shared, shelf, e2e)
 ├── backend/               Pi-side Rust service (UI + DB + orchestration)
 ├── press/                 Rust ffmpeg worker (runs on any LAN host)
 ├── shelf/                 optional read-only ABS-compat API over scribe.db
 ├── shared/                shared types (JobSpec, BookMeta, etc.)
+├── e2e/                   smoke suite — boots the real binaries, #[ignore]d
 ├── shim/                  Python sidecar wrapping mkb79/audible
 ├── frontend/              React + Vite + Emotion + TanStack Router
 └── .claude/skills/scribe-design/  design system
