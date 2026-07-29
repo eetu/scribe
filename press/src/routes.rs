@@ -70,10 +70,11 @@ async fn create_job(
                 // forever on a job that will never run.
                 let mut g = s.lock().await;
                 g.phase = Phase::Failed;
-                g.error.get_or_insert_with(|| "worker unavailable".to_string());
-                let _ = g
-                    .events
-                    .send(JobEvent::Failed { message: "worker unavailable".into() });
+                g.error
+                    .get_or_insert_with(|| "worker unavailable".to_string());
+                let _ = g.events.send(JobEvent::Failed {
+                    message: "worker unavailable".into(),
+                });
                 return;
             }
         };
@@ -85,7 +86,9 @@ async fn create_job(
                 if g.error.is_none() {
                     g.error = Some(e.to_string());
                 }
-                let _ = g.events.send(JobEvent::Failed { message: e.to_string() });
+                let _ = g.events.send(JobEvent::Failed {
+                    message: e.to_string(),
+                });
                 g.dir.clone()
             };
             // Purge scratch now (raw.aaxc + any partial out.m4b) instead of
@@ -122,11 +125,17 @@ async fn job_sse(
     Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
-async fn get_aaxc(State(state): State<PressState>, Path(id): Path<Uuid>) -> Result<Response, StatusCode> {
+async fn get_aaxc(
+    State(state): State<PressState>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, StatusCode> {
     serve_file(&state, id, FileKind::Aaxc).await
 }
 
-async fn get_m4b(State(state): State<PressState>, Path(id): Path<Uuid>) -> Result<Response, StatusCode> {
+async fn get_m4b(
+    State(state): State<PressState>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, StatusCode> {
     serve_file(&state, id, FileKind::M4b).await
 }
 
@@ -148,8 +157,14 @@ async fn serve_file(state: &PressState, id: Uuid, kind: FileKind) -> Result<Resp
             FileKind::M4b => (g.m4b_path(), "audio/mp4"),
         }
     };
-    let file = tokio::fs::File::open(&path).await.map_err(|_| StatusCode::NOT_FOUND)?;
-    let len = file.metadata().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.len();
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let len = file
+        .metadata()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .len();
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
     Ok((
@@ -162,7 +177,10 @@ async fn serve_file(state: &PressState, id: Uuid, kind: FileKind) -> Result<Resp
         .into_response())
 }
 
-async fn delete_job(State(state): State<PressState>, Path(id): Path<Uuid>) -> Result<StatusCode, StatusCode> {
+async fn delete_job(
+    State(state): State<PressState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
     let s = state.jobs.remove(id).await.ok_or(StatusCode::NOT_FOUND)?;
     let dir = { s.lock().await.dir.clone() };
     jobs::purge_dir(&dir).await;

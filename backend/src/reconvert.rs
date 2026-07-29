@@ -220,13 +220,7 @@ type BookMeta = (
     Option<String>,
     Option<String>,
 );
-type BookRow = (
-    String,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-);
+type BookRow = (String, String, String, Option<String>, Option<String>);
 
 async fn book_meta(state: &AppState, account_id: &str, asin: &str) -> Result<BookMeta, AppError> {
     let asin = asin.to_string();
@@ -375,4 +369,3 @@ impl Drop for TokenGuard {
         });
     }
 }
-

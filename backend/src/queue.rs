@@ -135,7 +135,8 @@ impl Queue {
                     // closer to a human pace than a scraper burst.
                     let base = inner.state.cfg.job_interjob_delay_s;
                     if base > 0 {
-                        let jitter_pct = inner.state.cfg.job_interjob_jitter_percent.min(95) as f64 / 100.0;
+                        let jitter_pct =
+                            inner.state.cfg.job_interjob_jitter_percent.min(95) as f64 / 100.0;
                         let factor = {
                             use rand::RngExt; // rand 0.10: random_range is on RngExt
                             1.0 + rand::rng().random_range(-jitter_pct..=jitter_pct)
@@ -236,7 +237,9 @@ impl Queue {
 
     pub async fn subscribe(&self, job_id: Uuid) -> Option<broadcast::Receiver<QueueEvent>> {
         let mut channels = self.inner.channels.lock().await;
-        let tx = channels.entry(job_id).or_insert_with(|| broadcast::channel(32).0);
+        let tx = channels
+            .entry(job_id)
+            .or_insert_with(|| broadcast::channel(32).0);
         Some(tx.subscribe())
     }
 
@@ -303,10 +306,15 @@ impl Queue {
             })
             .await?;
         for (raw, aaxc_path) in rows {
-            let Ok(id) = Uuid::parse_str(&raw) else { continue };
+            let Ok(id) = Uuid::parse_str(&raw) else {
+                continue;
+            };
             if aaxc_path.is_some() {
                 self.inner
-                    .save_failure(id, "reconvert interrupted by restart — retry from the library")
+                    .save_failure(
+                        id,
+                        "reconvert interrupted by restart — retry from the library",
+                    )
                     .await
                     .ok();
                 tracing::info!(%id, "failed interrupted reconvert on resume");
@@ -360,7 +368,12 @@ impl Inner {
         self.cancel_flags.lock().await.remove(&job_id);
     }
 
-    pub(crate) async fn set_phase(&self, job_id: Uuid, phase: Lifecycle, retry_count: u32) -> Result<(), AppError> {
+    pub(crate) async fn set_phase(
+        &self,
+        job_id: Uuid,
+        phase: Lifecycle,
+        retry_count: u32,
+    ) -> Result<(), AppError> {
         let id_s = job_id.to_string();
         let phase_s = phase.as_str().to_string();
         let now = crate::util::now_iso();
@@ -398,7 +411,12 @@ impl Inner {
         Ok(row)
     }
 
-    pub(crate) async fn save_outcome_done(&self, job_id: Uuid, aaxc: &str, m4b: &str) -> Result<(), AppError> {
+    pub(crate) async fn save_outcome_done(
+        &self,
+        job_id: Uuid,
+        aaxc: &str,
+        m4b: &str,
+    ) -> Result<(), AppError> {
         // INVARIANT: `aaxc_path` is only ever written here, at the terminal
         // `done` transition. `resume_pending` relies on that — a non-terminal
         // job that already has `aaxc_path` is treated as an interrupted
@@ -444,7 +462,9 @@ impl Inner {
             })
             .await?;
         let tx = self.channel(job_id).await;
-        let _ = tx.send(QueueEvent::Failed { message: msg.to_string() });
+        let _ = tx.send(QueueEvent::Failed {
+            message: msg.to_string(),
+        });
         self.evict(job_id).await;
         Ok(())
     }
@@ -476,7 +496,8 @@ impl Inner {
         }
 
         let (asin, account_id) = self.job_meta(job_id).await?;
-        self.set_phase(job_id, Lifecycle::FetchingVoucher, 0).await?;
+        self.set_phase(job_id, Lifecycle::FetchingVoucher, 0)
+            .await?;
 
         let max_retries = self.state.cfg.job_retry_max;
         let mut attempt: u32 = 0;
@@ -487,7 +508,8 @@ impl Inner {
                 return Ok(());
             }
 
-            self.set_phase(job_id, Lifecycle::Downloading, attempt).await?;
+            self.set_phase(job_id, Lifecycle::Downloading, attempt)
+                .await?;
             let input = PipelineInput {
                 account_id: account_id.clone(),
                 asin: asin.clone(),
@@ -500,7 +522,8 @@ impl Inner {
             let progress_tx = self.channel(job_id).await;
             match pipeline::run(&self.state, input, Some(progress_tx)).await {
                 Ok(out) => {
-                    self.set_phase(job_id, Lifecycle::Streaming, attempt).await?;
+                    self.set_phase(job_id, Lifecycle::Streaming, attempt)
+                        .await?;
                     let m4b = out.m4b_path.display().to_string();
                     let aaxc = out.aaxc_path.display().to_string();
                     self.save_outcome_done(job_id, &aaxc, &m4b).await?;

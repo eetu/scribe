@@ -59,9 +59,18 @@ impl OidcSettings {
     fn from_env() -> Option<Self> {
         let issuer = env::var("OIDC_ISSUER").ok().filter(|s| !s.is_empty())?;
         let client_id = env::var("OIDC_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
-        let client_secret = env::var("OIDC_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
-        let redirect_url = env::var("OIDC_REDIRECT_URL").ok().filter(|s| !s.is_empty())?;
-        Some(Self { issuer, client_id, client_secret, redirect_url })
+        let client_secret = env::var("OIDC_CLIENT_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty())?;
+        let redirect_url = env::var("OIDC_REDIRECT_URL")
+            .ok()
+            .filter(|s| !s.is_empty())?;
+        Some(Self {
+            issuer,
+            client_id,
+            client_secret,
+            redirect_url,
+        })
     }
 }
 
@@ -160,9 +169,8 @@ fn resolve_session_key(dev_auth: bool) -> anyhow::Result<String> {
     match env::var("SESSION_KEY") {
         Ok(k) if !k.trim().is_empty() => {
             let k = k.trim().to_string();
-            let decoded = hex::decode(&k).map_err(|_| {
-                anyhow::anyhow!("SESSION_KEY must be hex (128 chars = 64 bytes)")
-            })?;
+            let decoded = hex::decode(&k)
+                .map_err(|_| anyhow::anyhow!("SESSION_KEY must be hex (128 chars = 64 bytes)"))?;
             if decoded.len() < 64 {
                 anyhow::bail!(
                     "SESSION_KEY too short: {} bytes decoded, need ≥64 (128 hex chars). \

@@ -45,14 +45,26 @@ async fn full_stack_smoke() {
     let me = s.json(&format!("{}/api/me", s.backend)).await;
     assert_eq!(me["sub"], "smoke", "session should resolve the dev user");
     let library = s.json(&format!("{}/api/library", s.backend)).await;
-    assert_eq!(library["items"].as_array().map(|a| a.len()), Some(0), "library empty");
+    assert_eq!(
+        library["items"].as_array().map(|a| a.len()),
+        Some(0),
+        "library empty"
+    );
     // /api/accounts proxies the bearer-gated shim /accounts — a 200 here
     // proves the backend→shim shared-token auth works end to end.
     let accounts = s.json(&format!("{}/api/accounts", s.backend)).await;
-    assert_eq!(accounts.as_array().map(|a| a.len()), Some(0), "no accounts (backend↔shim bearer ok)");
+    assert_eq!(
+        accounts.as_array().map(|a| a.len()),
+        Some(0),
+        "no accounts (backend↔shim bearer ok)"
+    );
 
     // --- press auth boundary ---------------------------------------------
-    assert_eq!(s.code(&format!("{}/health", s.press)).await, 200, "press /health anon");
+    assert_eq!(
+        s.code(&format!("{}/health", s.press)).await,
+        200,
+        "press /health anon"
+    );
     let press_jobs = s
         .http
         .post(format!("{}/jobs", s.press))
@@ -65,7 +77,11 @@ async fn full_stack_smoke() {
 
     // --- shim auth boundary ----------------------------------------------
     // /health is exempt (liveness); /accounts now requires the bearer.
-    assert_eq!(s.code(&format!("{}/health", s.shim)).await, 200, "shim /health anon");
+    assert_eq!(
+        s.code(&format!("{}/health", s.shim)).await,
+        200,
+        "shim /health anon"
+    );
     assert_eq!(
         s.code(&format!("{}/accounts", s.shim)).await,
         401,
@@ -73,7 +89,11 @@ async fn full_stack_smoke() {
     );
 
     // --- shelf auth + library --------------------------------------------
-    assert_eq!(s.code(&format!("{}/ping", s.shelf)).await, 200, "shelf /ping anon");
+    assert_eq!(
+        s.code(&format!("{}/ping", s.shelf)).await,
+        200,
+        "shelf /ping anon"
+    );
     assert_eq!(
         s.code(&format!("{}/api/libraries", s.shelf)).await,
         401,
@@ -82,7 +102,8 @@ async fn full_stack_smoke() {
     // The ?token= query is scoped to the audio stream route only — it must
     // NOT authorize the JSON/metadata routes (keeps the key out of logs).
     assert_eq!(
-        s.code(&format!("{}/api/libraries?token={}", s.shelf, s.shelf_key)).await,
+        s.code(&format!("{}/api/libraries?token={}", s.shelf, s.shelf_key))
+            .await,
         401,
         "query token must not authorize JSON routes"
     );
@@ -97,7 +118,10 @@ async fn full_stack_smoke() {
         .await
         .expect("json");
     assert!(
-        libs["libraries"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        libs["libraries"]
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
         "shelf should expose at least one library"
     );
 
@@ -119,9 +143,18 @@ async fn full_stack_smoke() {
         "?token= must authorize the stream route"
     );
     let h = full.headers().clone();
-    assert_eq!(h.get("accept-ranges").map(|v| v.as_bytes()), Some(&b"bytes"[..]));
-    assert!(h.contains_key("etag"), "stream needs an ETag to be resumable");
-    assert!(h.contains_key("last-modified"), "stream needs Last-Modified");
+    assert_eq!(
+        h.get("accept-ranges").map(|v| v.as_bytes()),
+        Some(&b"bytes"[..])
+    );
+    assert!(
+        h.contains_key("etag"),
+        "stream needs an ETag to be resumable"
+    );
+    assert!(
+        h.contains_key("last-modified"),
+        "stream needs Last-Modified"
+    );
     assert_eq!(
         h.get("content-length").map(|v| v.as_bytes()),
         Some(&b"8192"[..]),

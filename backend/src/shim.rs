@@ -192,10 +192,7 @@ impl<'a> ShimClient<'a> {
         // generic 5xx so the queue can skip retries and the UI can
         // label it as "license denied" rather than "failed".
         if r.status() == reqwest::StatusCode::GONE {
-            let detail = r
-                .text()
-                .await
-                .unwrap_or_else(|_| "license denied".into());
+            let detail = r.text().await.unwrap_or_else(|_| "license denied".into());
             return Err(AppError::LicenseDenied(detail));
         }
         Ok(r.error_for_status()?.json().await?)

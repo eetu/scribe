@@ -32,7 +32,11 @@ pub async fn incremental(state: &AppState, account_id: &str) -> Result<SyncRepor
     walk(state, account_id, Some(10)).await
 }
 
-async fn walk(state: &AppState, account_id: &str, limit: Option<u64>) -> Result<SyncReport, AppError> {
+async fn walk(
+    state: &AppState,
+    account_id: &str,
+    limit: Option<u64>,
+) -> Result<SyncReport, AppError> {
     let shim = ShimClient::new(state);
     let mut report = SyncReport {
         account_id: account_id.to_string(),
@@ -92,7 +96,11 @@ async fn walk(state: &AppState, account_id: &str, limit: Option<u64>) -> Result<
     Ok(report)
 }
 
-async fn upsert(state: &AppState, account_id: &str, book: &LibraryBook) -> Result<(bool, bool), AppError> {
+async fn upsert(
+    state: &AppState,
+    account_id: &str,
+    book: &LibraryBook,
+) -> Result<(bool, bool), AppError> {
     let asin = book.asin.clone();
     let acct = account_id.to_string();
     let title = book.title.clone();

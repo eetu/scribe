@@ -68,9 +68,7 @@ pub async fn run(
     // reconvert can decrypt the local AAXC without re-fetching from
     // Audible (Plus revocations etc).
     let (voucher_key_hex, voucher_iv_hex, activation_bytes_hex) = match &src.drm {
-        PressDrm::Aaxc { key_hex, iv_hex } => {
-            (Some(key_hex.clone()), Some(iv_hex.clone()), None)
-        }
+        PressDrm::Aaxc { key_hex, iv_hex } => (Some(key_hex.clone()), Some(iv_hex.clone()), None),
         PressDrm::Aax { activation_bytes } => (None, None, Some(activation_bytes.clone())),
     };
 
@@ -219,9 +217,7 @@ async fn resolve_unique_m4b_path(
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or("m4b");
-    let parent = canonical
-        .parent()
-        .unwrap_or(std::path::Path::new(""));
+    let parent = canonical.parent().unwrap_or(std::path::Path::new(""));
     parent.join(format!("{stem} ({asin}).{ext}"))
 }
 
@@ -329,4 +325,3 @@ async fn poll_until_terminal(
         }
     }
 }
-

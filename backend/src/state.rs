@@ -23,7 +23,10 @@ pub struct AaxcTokenStore {
 
 impl AaxcTokenStore {
     pub async fn insert(&self, token: String, path: PathBuf) {
-        self.inner.lock().await.insert(token, (path, Instant::now()));
+        self.inner
+            .lock()
+            .await
+            .insert(token, (path, Instant::now()));
     }
     pub async fn lookup(&self, token: &str) -> Option<PathBuf> {
         let now = Instant::now();

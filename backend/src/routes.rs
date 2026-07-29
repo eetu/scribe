@@ -148,7 +148,10 @@ async fn get_settings(user: AuthProfile, State(state): State<AppState>) -> AppRe
     let mut out = serde_json::Map::new();
     for key in USER_TUNABLE_KEYS {
         let env_default = env_default_for(&state, key);
-        let effective = overrides_map.get(*key).cloned().unwrap_or_else(|| env_default.clone());
+        let effective = overrides_map
+            .get(*key)
+            .cloned()
+            .unwrap_or_else(|| env_default.clone());
         out.insert(
             (*key).into(),
             json!({
@@ -286,7 +289,11 @@ async fn refresh_account(
     assert_owns_account(&state, user.id(), &id).await?;
     let r = state
         .http
-        .post(format!("{}/accounts/{}/refresh", state.cfg.shim_url.trim_end_matches('/'), id))
+        .post(format!(
+            "{}/accounts/{}/refresh",
+            state.cfg.shim_url.trim_end_matches('/'),
+            id
+        ))
         .send()
         .await?
         .error_for_status()?
@@ -317,7 +324,10 @@ async fn deregister_account(
     state
         .db
         .with(move |c| {
-            c.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id_s])?;
+            c.execute(
+                "DELETE FROM accounts WHERE id = ?1",
+                rusqlite::params![id_s],
+            )?;
             Ok(())
         })
         .await?;
@@ -344,7 +354,10 @@ async fn login_finish(
         &state,
         &resp.account_id,
         resp.locale.as_deref().unwrap_or(""),
-        summary.as_ref().map(|s| s.email_masked.as_str()).unwrap_or(""),
+        summary
+            .as_ref()
+            .map(|s| s.email_masked.as_str())
+            .unwrap_or(""),
         resp.customer_name.as_deref(),
         user.id(),
     )
@@ -432,19 +445,22 @@ async fn sync_library(
             assert_owns_account(&state, user.id(), &id).await?;
             vec![id]
         }
-        None => state
-            .db
-            .with({
-                let pid = user.id();
-                move |c| {
-                    let mut stmt = c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
-                    let v = stmt
-                        .query_map([pid], |r| r.get::<_, String>(0))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    Ok(v)
-                }
-            })
-            .await?,
+        None => {
+            state
+                .db
+                .with({
+                    let pid = user.id();
+                    move |c| {
+                        let mut stmt =
+                            c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
+                        let v = stmt
+                            .query_map([pid], |r| r.get::<_, String>(0))?
+                            .collect::<rusqlite::Result<Vec<_>>>()?;
+                        Ok(v)
+                    }
+                })
+                .await?
+        }
     };
 
     let mut reports = Vec::with_capacity(accounts.len());
@@ -507,27 +523,29 @@ async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResul
     // poll/reconcile cycle.
     let items = rows
         .into_iter()
-        .map(|(id, asin, account_id, status, created_at, updated_at, error, m4b_path, aaxc_path)| {
-            let m4b_present = m4b_path
-                .as_deref()
-                .map(|p| std::path::Path::new(p).is_file())
-                .unwrap_or(false);
-            let aaxc_present = aaxc_path
-                .as_deref()
-                .map(|p| std::path::Path::new(p).is_file())
-                .unwrap_or(false);
-            json!({
-                "id": id,
-                "asin": asin,
-                "account_id": account_id,
-                "status": status,
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "error": error,
-                "m4b_present": m4b_present,
-                "aaxc_present": aaxc_present,
-            })
-        })
+        .map(
+            |(id, asin, account_id, status, created_at, updated_at, error, m4b_path, aaxc_path)| {
+                let m4b_present = m4b_path
+                    .as_deref()
+                    .map(|p| std::path::Path::new(p).is_file())
+                    .unwrap_or(false);
+                let aaxc_present = aaxc_path
+                    .as_deref()
+                    .map(|p| std::path::Path::new(p).is_file())
+                    .unwrap_or(false);
+                json!({
+                    "id": id,
+                    "asin": asin,
+                    "account_id": account_id,
+                    "status": status,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "error": error,
+                    "m4b_present": m4b_present,
+                    "aaxc_present": aaxc_present,
+                })
+            },
+        )
         .collect::<Vec<_>>();
     Ok(Json(json!({ "items": items })))
 }
@@ -564,19 +582,22 @@ async fn enqueue_all(
             assert_owns_account(&state, user.id(), &id).await?;
             vec![id]
         }
-        None => state
-            .db
-            .with({
-                let pid = user.id();
-                move |c| {
-                    let mut stmt = c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
-                    let v = stmt
-                        .query_map([pid], |r| r.get::<_, String>(0))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    Ok(v)
-                }
-            })
-            .await?,
+        None => {
+            state
+                .db
+                .with({
+                    let pid = user.id();
+                    move |c| {
+                        let mut stmt =
+                            c.prepare("SELECT id FROM accounts WHERE profile_id = ?1")?;
+                        let v = stmt
+                            .query_map([pid], |r| r.get::<_, String>(0))?
+                            .collect::<rusqlite::Result<Vec<_>>>()?;
+                        Ok(v)
+                    }
+                })
+                .await?
+        }
     };
     let mut total = 0usize;
     for acct in &accounts {
@@ -595,10 +616,16 @@ async fn job_sse(
 ) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, AppError> {
     let job_id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("invalid uuid".into()))?;
     assert_owns_job(&state, user.id(), job_id).await?;
-    let rx = state.queue().subscribe(job_id).await.ok_or(AppError::NotFound)?;
+    let rx = state
+        .queue()
+        .subscribe(job_id)
+        .await
+        .ok_or(AppError::NotFound)?;
     let stream = BroadcastStream::new(rx).filter_map(|res| {
         res.ok().and_then(|ev: QueueEvent| {
-            serde_json::to_string(&ev).ok().map(|s| Ok(Event::default().data(s)))
+            serde_json::to_string(&ev)
+                .ok()
+                .map(|s| Ok(Event::default().data(s)))
         })
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
@@ -615,7 +642,10 @@ async fn cancel_job(
     Ok(Json(json!({ "cancelled": cancelled })))
 }
 
-async fn reconcile_route(_user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
+async fn reconcile_route(
+    _user: AuthProfile,
+    State(state): State<AppState>,
+) -> AppResult<Json<Value>> {
     let report = crate::reconcile::scan(&state)
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
@@ -961,9 +991,13 @@ mod tests {
     #[tokio::test]
     async fn range_probe_reports_total_size() {
         let (_dir, path) = fixture();
-        let resp = serve_local_file(&path, get(Some("bytes=0-0")), &mime::APPLICATION_OCTET_STREAM)
-            .await
-            .expect("serve");
+        let resp = serve_local_file(
+            &path,
+            get(Some("bytes=0-0")),
+            &mime::APPLICATION_OCTET_STREAM,
+        )
+        .await
+        .expect("serve");
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
         let content_range = resp
             .headers()
@@ -975,7 +1009,10 @@ mod tests {
         // The parse press actually performs, so this test fails if the format
         // drifts out from under it.
         assert_eq!(
-            content_range.rsplit('/').next().and_then(|s| s.parse::<u64>().ok()),
+            content_range
+                .rsplit('/')
+                .next()
+                .and_then(|s| s.parse::<u64>().ok()),
             Some(LEN as u64)
         );
     }

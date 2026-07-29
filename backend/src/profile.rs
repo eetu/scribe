@@ -30,7 +30,11 @@ pub struct Profile {
 ///
 /// `email` defaults to `{sub}@local` in callers when the upstream identity
 /// provider doesn't surface a real email (e.g. DEV_AUTH without ?email=).
-pub async fn resolve_or_create(state: &AppState, sub: &str, email: &str) -> Result<Profile, AppError> {
+pub async fn resolve_or_create(
+    state: &AppState,
+    sub: &str,
+    email: &str,
+) -> Result<Profile, AppError> {
     let sub_s = sub.to_string();
     let email_s = email.to_lowercase();
 
@@ -84,7 +88,11 @@ fn row_to_profile(r: &rusqlite::Row<'_>) -> rusqlite::Result<Profile> {
 
 // ---------- per-profile settings ----------
 
-pub async fn get_setting(state: &AppState, profile_id: i64, key: &str) -> Result<Option<String>, AppError> {
+pub async fn get_setting(
+    state: &AppState,
+    profile_id: i64,
+    key: &str,
+) -> Result<Option<String>, AppError> {
     let key_s = key.to_string();
     let v = state
         .db
@@ -100,7 +108,12 @@ pub async fn get_setting(state: &AppState, profile_id: i64, key: &str) -> Result
     Ok(v)
 }
 
-pub async fn set_setting(state: &AppState, profile_id: i64, key: &str, value: &str) -> Result<(), AppError> {
+pub async fn set_setting(
+    state: &AppState,
+    profile_id: i64,
+    key: &str,
+    value: &str,
+) -> Result<(), AppError> {
     let key_s = key.to_string();
     let value_s = value.to_string();
     state
@@ -141,20 +154,31 @@ pub async fn effective(
     key: &str,
     env_default: String,
 ) -> Result<String, AppError> {
-    Ok(get_setting(state, profile_id, key).await?.unwrap_or(env_default))
+    Ok(get_setting(state, profile_id, key)
+        .await?
+        .unwrap_or(env_default))
 }
 
 pub fn parse_bool(s: &str) -> bool {
-    matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        s.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
-pub async fn all_settings(state: &AppState, profile_id: i64) -> Result<Vec<(String, String)>, AppError> {
+pub async fn all_settings(
+    state: &AppState,
+    profile_id: i64,
+) -> Result<Vec<(String, String)>, AppError> {
     let rows = state
         .db
         .with(move |c| {
-            let mut stmt = c.prepare("SELECT key, value FROM profile_settings WHERE profile_id = ?1")?;
+            let mut stmt =
+                c.prepare("SELECT key, value FROM profile_settings WHERE profile_id = ?1")?;
             let v = stmt
-                .query_map([profile_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .query_map([profile_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(v)
         })

@@ -54,7 +54,10 @@ mod tests {
     use super::Drm;
 
     fn aaxc(key: &str, iv: &str) -> Drm {
-        Drm::Aaxc { key_hex: key.into(), iv_hex: iv.into() }
+        Drm::Aaxc {
+            key_hex: key.into(),
+            iv_hex: iv.into(),
+        }
     }
 
     #[test]
@@ -78,9 +81,21 @@ mod tests {
 
     #[test]
     fn aax_charset_enforced() {
-        assert!(Drm::Aax { activation_bytes: "deadbeef".into() }.validate().is_ok());
-        assert!(Drm::Aax { activation_bytes: "-y deadb".into() }.validate().is_err());
-        assert!(Drm::Aax { activation_bytes: "zzzzzzzz".into() }.validate().is_err());
+        assert!(Drm::Aax {
+            activation_bytes: "deadbeef".into()
+        }
+        .validate()
+        .is_ok());
+        assert!(Drm::Aax {
+            activation_bytes: "-y deadb".into()
+        }
+        .validate()
+        .is_err());
+        assert!(Drm::Aax {
+            activation_bytes: "zzzzzzzz".into()
+        }
+        .validate()
+        .is_err());
     }
 
     use super::{JobMap, JobReq};
