@@ -10,6 +10,8 @@ use axum::{Json, Router};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use tower_http::services::ServeFile;
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::abs;
 use crate::auth::{bearer_guard, bearer_guard_stream};
@@ -50,6 +52,34 @@ pub fn router(state: ShelfState) -> Router {
         .merge(unauth)
         .merge(stream)
         .merge(protected)
+        .layer(
+            TraceLayer::new_for_http()
+                // Path, never the full URI. The stream route authenticates via
+                // `?token=<api key>` (see bearer_guard_stream) and the default
+                // span records the query string, which would write the
+                // long-lived key straight into the journal.
+                //
+                // `Range` is recorded because it is the field that makes a
+                // resume diagnosable: a request carrying one that comes back
+                // 200 rather than 206 means the resume was refused.
+                .make_span_with(|req: &Request<Body>| {
+                    let range = req
+                        .headers()
+                        .get(header::RANGE)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-");
+                    tracing::info_span!(
+                        "request",
+                        method = %req.method(),
+                        path = %req.uri().path(),
+                        range = %range,
+                    )
+                })
+                // The response carries status and latency, so it is the line
+                // worth having at info. tower-http defaults it to debug, which
+                // this service's filter (`info,scribe_shelf=debug`) drops.
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
 }
 
 async fn ping() -> Json<serde_json::Value> {
@@ -851,6 +881,16 @@ async fn serve_file_validated(
     if served.status() == StatusCode::PARTIAL_CONTENT {
         if let Some(if_range) = parts.headers.get(header::IF_RANGE) {
             if !if_range_matches(if_range, served.headers()) {
+                // Worth a line: from the client's side this is indistinguishable
+                // from a download that simply started over, so without it a
+                // refused resume looks like a client bug.
+                tracing::debug!(
+                    path,
+                    if_range = ?if_range,
+                    etag = ?served.headers().get(header::ETAG),
+                    last_modified = ?served.headers().get(header::LAST_MODIFIED),
+                    "If-Range did not match; serving the full file instead of a range",
+                );
                 // Dropping `served` drops a file handle whose body was never
                 // polled, so the stale attempt costs one open() and a seek.
                 drop(served);
