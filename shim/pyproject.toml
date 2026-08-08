@@ -9,7 +9,7 @@ dependencies = [
   # Plain uvicorn (not [standard]): the loopback, low-QPS sidecar doesn't
   # need uvloop/httptools/websockets/watchfiles — dropping them cuts RSS +
   # image size on the 1 GB Pi. uvicorn falls back to asyncio + h11.
-  "uvicorn>=0.51.0",
+  "uvicorn>=0.52.0",
   "cryptography>=49.0.0",
   "python-dotenv>=1.2.2",
 ]
@@ -22,7 +22,7 @@ shim = "shim.__main__:main"
 # project env via `uv run ruff` — previously the hook called a ruff that was
 # never installed, so it failed to spawn on every shim commit.
 [dependency-groups]
-dev = ["ruff>=0.15.22"]
+dev = ["ruff>=0.16.1"]
 
 [tool.uv]
 package = true
