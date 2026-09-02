@@ -654,6 +654,7 @@ async fn reconcile_route(
         "jobs_inserted": report.jobs_inserted,
         "jobs_promoted": report.jobs_promoted,
         "jobs_already": report.jobs_already,
+        "paths_rerooted": report.paths_rerooted,
         "errors": report.errors,
     })))
 }
