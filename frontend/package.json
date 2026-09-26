@@ -17,7 +17,7 @@
   "dependencies": {
     "@anarkisti/igyb": "^0.5.0",
     "@emotion/react": "^11.14.0",
-    "@tanstack/react-router": "^1.170.36",
+    "@tanstack/react-router": "^1.170.38",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "swr": "^2.5.1",
@@ -26,15 +26,15 @@
   "devDependencies": {
     "@anarkisti/eslint-config": "^1.1.0",
     "@tanstack/eslint-plugin-router": "^1.162.0",
-    "@tanstack/router-plugin": "^1.168.38",
+    "@tanstack/router-plugin": "^1.168.40",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "babel-plugin-react-compiler": "^1.0.0",
-    "eslint": "^10.10.0",
-    "prettier": "^3.9.6",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.8",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.0",
+    "typescript-eslint": "^8.70.1",
     "vite": "^8.3.0"
   },
   "packageManager": "yarn@4.16.0"
