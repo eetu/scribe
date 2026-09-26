@@ -129,7 +129,7 @@ jobs:
 
       - name: Build and push backend image
         if: steps.gate.outputs.backend == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: runner
@@ -160,7 +160,7 @@ jobs:
 
       - name: Build and push shim image
         if: steps.gate.outputs.shim == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: shim-runner
@@ -186,7 +186,7 @@ jobs:
 
       - name: Build and push press image
         if: steps.gate.outputs.press == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: press-runner
@@ -212,7 +212,7 @@ jobs:
 
       - name: Build and push shelf image
         if: steps.gate.outputs.shelf == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: shelf-runner
