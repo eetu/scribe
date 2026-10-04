@@ -1,9 +1,4 @@
-import {
-  type GlyphEnv,
-  glyphTile,
-  mix,
-  type Palette,
-} from "@anarkisti/igyb/core";
+import { type GlyphEnv, glyphTile, mix, type Palette } from "@anarkisti/igyb/core";
 import { type Theme, useTheme } from "@emotion/react";
 import { useEffect, useRef } from "react";
 

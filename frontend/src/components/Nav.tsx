@@ -23,9 +23,7 @@ export default function Nav() {
     >
       {items.map((item) => {
         const active =
-          item.to === "/"
-            ? location.pathname === "/"
-            : location.pathname.startsWith(item.to);
+          item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to);
         return (
           <Link
             key={item.to}

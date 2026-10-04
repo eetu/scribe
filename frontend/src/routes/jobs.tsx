@@ -10,7 +10,6 @@ export const Route = createFileRoute("/jobs")({ component: JobsPage });
 const jobsFetcher = () => api.jobs();
 const libraryFetcher = () => api.library();
 
-// eslint-disable-next-line react-refresh/only-export-components
 function JobsPage() {
   const theme = useTheme();
   const { data, isLoading } = useSWR("/api/jobs", jobsFetcher, {
@@ -36,9 +35,7 @@ function JobsPage() {
     );
   }
 
-  const bookByAsin = new Map(
-    (lib?.items ?? []).map((b) => [b.asin, b] as const),
-  );
+  const bookByAsin = new Map((lib?.items ?? []).map((b) => [b.asin, b] as const));
 
   return (
     <>

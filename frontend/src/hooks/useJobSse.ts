@@ -50,10 +50,7 @@ export function useJobSse(jobId: string | null): JobLive {
           // press round-trip including ffmpeg). Press Progress events are
           // fine-grained. Independent dimensions — a Phase event must not
           // clobber the Progress phase. Only terminal events drop progress.
-          const isTerminal =
-            ev.kind === "done" ||
-            ev.kind === "failed" ||
-            ev.kind === "cancelled";
+          const isTerminal = ev.kind === "done" || ev.kind === "failed" || ev.kind === "cancelled";
           if (isTerminal) {
             terminal = true;
             es?.close();

@@ -66,9 +66,7 @@ export default function BookCard({
 }: Props) {
   const theme = useTheme();
   const status = jobStatus(job);
-  const coverSrc = coverBust
-    ? `${coverUrl(book.asin)}?v=${coverBust}`
-    : coverUrl(book.asin);
+  const coverSrc = coverBust ? `${coverUrl(book.asin)}?v=${coverBust}` : coverUrl(book.asin);
   const isDuplicate = duplicateOf.length > 0;
   // Status band: a tinted full-width strip below the cover; tone drives
   // the color so the card's state reads at a glance regardless of where
@@ -183,9 +181,7 @@ export default function BookCard({
             loading="lazy"
           />
         ) : (
-          <span css={{ color: theme.colors.text.muted, fontSize: 12 }}>
-            no cover
-          </span>
+          <span css={{ color: theme.colors.text.muted, fontSize: 12 }}>no cover</span>
         )}
         {region && (
           <span
@@ -212,11 +208,7 @@ export default function BookCard({
         {book.bitrate_kbps != null && (
           <span
             title={`${book.bitrate_kbps} kbps${
-              book.channels === 1
-                ? " · mono"
-                : book.channels === 2
-                  ? " · stereo"
-                  : ""
+              book.channels === 1 ? " · mono" : book.channels === 2 ? " · stereo" : ""
             }${
               dupeBetterKbps
                 ? ` — a higher-quality copy is in your library (${dupeBetterKbps} kbps)`
@@ -287,10 +279,7 @@ export default function BookCard({
                   stroke="rgba(255, 255, 255, 0.16)"
                   strokeWidth="25"
                   strokeDasharray={WEDGE_CIRCUMFERENCE}
-                  strokeDashoffset={
-                    WEDGE_CIRCUMFERENCE *
-                    (1 - Math.min(1, Math.max(0, progress)))
-                  }
+                  strokeDashoffset={WEDGE_CIRCUMFERENCE * (1 - Math.min(1, Math.max(0, progress)))}
                   css={{ transition: "stroke-dashoffset 250ms linear" }}
                 />
                 <circle
@@ -331,21 +320,11 @@ export default function BookCard({
               css={{ ...playOverlay, ...(isPlaying ? { opacity: 1 } : {}) }}
             >
               {isPlaying ? (
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
                 </svg>
               ) : (
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z" />
                 </svg>
               )}

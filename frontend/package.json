@@ -6,12 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "lint": "eslint eslint.config.js src",
-    "lint:fix": "eslint eslint.config.js src --fix",
-    "format": "prettier --check src",
-    "format:fix": "prettier --write src",
+    "lint": "biome check src",
+    "lint:fix": "biome check --write src",
     "typecheck": "tsc --noEmit",
-    "validate": "yarn typecheck && yarn lint && yarn format",
+    "validate": "yarn typecheck && yarn lint",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -24,17 +22,14 @@
     "usehooks-ts": "^3.1.1"
   },
   "devDependencies": {
-    "@anarkisti/eslint-config": "^1.1.0",
-    "@tanstack/eslint-plugin-router": "^1.162.0",
+    "@anarkisti/biome-config": "^1.0.0",
+    "@biomejs/biome": "^2.5.15",
     "@tanstack/router-plugin": "^1.168.41",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "babel-plugin-react-compiler": "^1.0.0",
-    "eslint": "^10.11.0",
-    "prettier": "^3.9.9",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.1",
     "vite": "^8.3.1"
   },
   "packageManager": "yarn@4.16.0"

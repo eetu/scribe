@@ -2,7 +2,7 @@ import { useTheme } from "@emotion/react";
 import { useEffect } from "react";
 import useSWR from "swr";
 
-import { api, ApiError } from "../api";
+import { ApiError, api } from "../api";
 
 const fetcher = () => api.me();
 
@@ -20,10 +20,7 @@ export default function LoginGate({ children }: { children: React.ReactNode }) {
   // returns the user to where they were heading.
   useEffect(() => {
     if (unauthorized) {
-      const next =
-        window.location.pathname +
-        window.location.search +
-        window.location.hash;
+      const next = window.location.pathname + window.location.search + window.location.hash;
       window.location.replace(`/auth/login?next=${encodeURIComponent(next)}`);
     }
   }, [unauthorized]);

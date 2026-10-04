@@ -15,17 +15,14 @@ const ACTIVE_JOB_PHASES = new Set([
   "streaming",
 ]);
 
-type FilterKey =
-  "all" | "done" | "failed" | "unavailable" | "missing" | "in_progress" | "new";
+type FilterKey = "all" | "done" | "failed" | "unavailable" | "missing" | "in_progress" | "new";
 type SortKey = "title" | "author" | "added" | "status";
 
 function bucket(job: Job | null): Exclude<FilterKey, "all"> {
   if (!job) return "new";
   if (job.status === "done") return job.m4b_present ? "done" : "missing";
   if (job.status === "failed") {
-    return job.error?.toLowerCase().startsWith("license denied")
-      ? "unavailable"
-      : "failed";
+    return job.error?.toLowerCase().startsWith("license denied") ? "unavailable" : "failed";
   }
   if (job.status === "cancelled") return "new";
   if (ACTIVE_JOB_PHASES.has(job.status)) return "in_progress";
@@ -58,7 +55,6 @@ function guard(action: string, fn: () => Promise<void>): Promise<void> {
   return fn().catch((e) => alert(`${action} failed — ${String(e)}`));
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 function LibraryPage() {
   const theme = useTheme();
   // Poll on the same 5s cadence as jobs so a background convert completing
@@ -115,12 +111,7 @@ function LibraryPage() {
     // (currentTime can't be set before then).
     if (loadedAsinRef.current !== book.asin) {
       stashPosition(a);
-      a.src = audioUrl(
-        me.shelf_url,
-        me.shelf_api_key,
-        book.account_id,
-        book.asin,
-      );
+      a.src = audioUrl(me.shelf_url, me.shelf_api_key, book.account_id, book.asin);
       loadedAsinRef.current = book.asin;
       setProgress(0);
       const target = positionsRef.current.get(book.asin) ?? 0;
@@ -281,9 +272,7 @@ function LibraryPage() {
         onTimeUpdate={(e) => {
           const a = e.currentTarget;
           if (a.duration > 0) {
-            setProgress(
-              Math.min(1, Math.round((a.currentTime / a.duration) * 200) / 200),
-            );
+            setProgress(Math.min(1, Math.round((a.currentTime / a.duration) * 200) / 200));
           }
         }}
         onEnded={() => {
@@ -308,11 +297,10 @@ function LibraryPage() {
             lineHeight: 1.5,
           }}
         >
-          {undownloaded} book{undownloaded === 1 ? "" : "s"} synced, nothing
-          downloaded yet. auto-sync only kicks in on the next audible purchase —
-          for the backlog, hit{" "}
-          <strong css={{ color: theme.colors.text.main }}>download all</strong>{" "}
-          or pick books individually.
+          {undownloaded} book{undownloaded === 1 ? "" : "s"} synced, nothing downloaded yet.
+          auto-sync only kicks in on the next audible purchase — for the backlog, hit{" "}
+          <strong css={{ color: theme.colors.text.main }}>download all</strong> or pick books
+          individually.
         </div>
       )}
       <div
@@ -347,18 +335,12 @@ function LibraryPage() {
         <div css={{ display: "flex", gap: 8 }}>
           <button
             onClick={() => {
-              if (
-                !confirm(
-                  "Queue downloads for every Active book that isn't already in jobs?",
-                )
-              )
+              if (!confirm("Queue downloads for every Active book that isn't already in jobs?"))
                 return;
               void guard("download all", async () => {
                 const r = await api.enqueueAll({});
                 mutate("/api/jobs");
-                alert(
-                  `queued ${r.queued} new job(s) across ${r.accounts} account(s)`,
-                );
+                alert(`queued ${r.queued} new job(s) across ${r.accounts} account(s)`);
               });
             }}
             css={chipButton(theme)}
@@ -380,9 +362,7 @@ function LibraryPage() {
               }
               // Bust every cover so rotated art reloads, and refetch as
               // the background pass lands (metadata first, then derived).
-              setCoverBust(
-                Object.fromEntries(items.map((b) => [b.asin, Date.now()])),
-              );
+              setCoverBust(Object.fromEntries(items.map((b) => [b.asin, Date.now()])));
               mutate("/api/library");
               mutate("/api/jobs");
               setTimeout(() => {
@@ -425,9 +405,7 @@ function LibraryPage() {
             // Hide empty buckets so the row stays compact; keep "all"
             // always, and keep the active filter visible even at zero so
             // a user-driven empty bucket isn't yanked from under them.
-            .filter(
-              ([key]) => key === "all" || counts[key] > 0 || filter === key,
-            )
+            .filter(([key]) => key === "all" || counts[key] > 0 || filter === key)
             .map(([key, label]) => (
               <button
                 key={key}

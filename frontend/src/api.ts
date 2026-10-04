@@ -127,19 +127,13 @@ export class ApiError extends Error {
 
 /** Same-origin cover endpoint — serves the disk-cached copy (lazily
  * mirrored from Amazon), so art survives Amazon pulling a title. */
-export const coverUrl = (asin: string) =>
-  `/api/books/${encodeURIComponent(asin)}/cover`;
+export const coverUrl = (asin: string) => `/api/books/${encodeURIComponent(asin)}/cover`;
 
 /** Cross-origin shelf stream for the in-UI preview player. shelf's
  * /file/{ino} ignores the ino, resolving the m4b from {account}:{asin}
  * alone, so a literal 0 works. Token rides as a query param (no header
  * injection on a media element); it's the same key shown in settings. */
-export const audioUrl = (
-  shelfUrl: string,
-  token: string,
-  accountId: string,
-  asin: string,
-) =>
+export const audioUrl = (shelfUrl: string, token: string, accountId: string, asin: string) =>
   `${shelfUrl.replace(/\/+$/, "")}/api/items/${encodeURIComponent(
     `${accountId}:${asin}`,
   )}/file/0?token=${encodeURIComponent(token)}`;
@@ -193,12 +187,10 @@ export const api = {
       { method: "DELETE" },
     ),
   refreshBook: (asin: string) =>
-    req<{ refreshed: number }>(
-      `/api/books/${encodeURIComponent(asin)}/refresh`,
-      { method: "POST" },
-    ),
-  refreshLibrary: () =>
-    req<{ started: boolean }>("/api/library/refresh", { method: "POST" }),
+    req<{ refreshed: number }>(`/api/books/${encodeURIComponent(asin)}/refresh`, {
+      method: "POST",
+    }),
+  refreshLibrary: () => req<{ started: boolean }>("/api/library/refresh", { method: "POST" }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
   settings: () => req<Settings>("/api/settings"),
   patchSettings: (body: Record<string, string>) =>

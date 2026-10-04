@@ -20,9 +20,7 @@ const ACTIVE_PHASES = new Set([
 export default function JobRow({ job, book, onCancel }: Props) {
   const theme = useTheme();
   const active = ACTIVE_PHASES.has(job.status);
-  const { status: ev, progress: liveProgress } = useJobSse(
-    active ? job.id : null,
-  );
+  const { status: ev, progress: liveProgress } = useJobSse(active ? job.id : null);
 
   // Effective status. Priority order:
   //   1. Live Progress event phase — press's actual sub-state (downloading
@@ -31,29 +29,20 @@ export default function JobRow({ job, book, onCancel }: Props) {
   //      the ffmpeg pass.
   //   2. Most recent Phase event — fires on queue lifecycle transitions.
   //   3. The DB row's last-saved status.
-  const status =
-    liveProgress?.phase ??
-    (ev?.kind === "phase" ? ev.phase : null) ??
-    job.status;
+  const status = liveProgress?.phase ?? (ev?.kind === "phase" ? ev.phase : null) ?? job.status;
   // Each phase fills 0→100% on its own — chip label tells the user which
   // phase they're in (downloading vs converting vs streaming). No global
   // % across phases: we don't actually know the relative weights between
   // CDN download, ffmpeg remux, and the LAN copy, and inventing them
   // would just shift the lie. When bytes_total isn't known yet (queued,
   // fetching_voucher), bar sits at 0 and the chip carries the story.
-  const progress =
-    liveProgress && liveProgress.bytes_total
-      ? Math.min(
-          100,
-          Math.round(
-            (liveProgress.bytes_done / liveProgress.bytes_total) * 100,
-          ),
-        )
-      : status === "done"
+  const progress = liveProgress?.bytes_total
+    ? Math.min(100, Math.round((liveProgress.bytes_done / liveProgress.bytes_total) * 100))
+    : status === "done"
+      ? 100
+      : status === "failed" || status === "cancelled"
         ? 100
-        : status === "failed" || status === "cancelled"
-          ? 100
-          : 0;
+        : 0;
   const bytesLabel = formatBytesLabel(liveProgress);
 
   return (
@@ -70,9 +59,7 @@ export default function JobRow({ job, book, onCancel }: Props) {
         opacity: active ? 1 : 0.85,
       }}
     >
-      <div
-        css={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}
-      >
+      <div css={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
         <span
           css={{
             fontFamily: theme.fonts.heading,
@@ -94,9 +81,7 @@ export default function JobRow({ job, book, onCancel }: Props) {
           css={{
             position: "relative",
             height: 4,
-            background: active
-              ? theme.colors.activity.offBackground
-              : "transparent",
+            background: active ? theme.colors.activity.offBackground : "transparent",
             borderRadius: 2,
             overflow: "hidden",
           }}
@@ -109,10 +94,7 @@ export default function JobRow({ job, book, onCancel }: Props) {
                 top: 0,
                 bottom: 0,
                 width: `${progress}%`,
-                background:
-                  status === "failed"
-                    ? theme.colors.error
-                    : theme.colors.activity.on,
+                background: status === "failed" ? theme.colors.error : theme.colors.activity.on,
                 transition: "width 0.4s ease",
               }}
             />
@@ -123,8 +105,7 @@ export default function JobRow({ job, book, onCancel }: Props) {
         css={{
           fontFamily: theme.fonts.heading,
           fontSize: 12,
-          color:
-            status === "failed" ? theme.colors.error : theme.colors.text.muted,
+          color: status === "failed" ? theme.colors.error : theme.colors.text.muted,
           textAlign: "right",
           minWidth: 100,
         }}

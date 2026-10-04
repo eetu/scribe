@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import { useTheme } from "@emotion/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
@@ -69,11 +68,7 @@ function SettingsPage() {
         <>
           <SectionTitle theme={theme}>shelf access</SectionTitle>
           <Card theme={theme}>
-            <ShelfAccess
-              theme={theme}
-              url={me.shelf_url}
-              apiKey={me.shelf_api_key}
-            />
+            <ShelfAccess theme={theme} url={me.shelf_url} apiKey={me.shelf_api_key} />
           </Card>
         </>
       )}
@@ -94,9 +89,7 @@ function SettingsPage() {
                   padding: "6px 14px",
                   background: active ? theme.colors.activity.on : "transparent",
                   color: active ? "white" : theme.colors.text.muted,
-                  border: `1px solid ${
-                    active ? theme.colors.activity.on : theme.colors.border
-                  }`,
+                  border: `1px solid ${active ? theme.colors.activity.on : theme.colors.border}`,
                   borderRadius: 4,
                   fontFamily: theme.fonts.heading,
                   fontSize: 13,
@@ -135,9 +128,7 @@ function Header({ me }: { me: Me }) {
       >
         settings
       </h2>
-      <span css={{ fontSize: 12, color: theme.colors.text.muted }}>
-        {me.email}
-      </span>
+      <span css={{ fontSize: 12, color: theme.colors.text.muted }}>{me.email}</span>
     </div>
   );
 }
@@ -184,8 +175,8 @@ function ShelfAccess({
           lineHeight: 1.5,
         }}
       >
-        scribe-shelf exposes the library to audiobookshelf-compatible clients
-        like listen-this. paste the URL + api key into the client's settings.
+        scribe-shelf exposes the library to audiobookshelf-compatible clients like listen-this.
+        paste the URL + api key into the client's settings.
       </div>
       <Field theme={theme} label="server URL" value={url} />
       <Field theme={theme} label="api key" value={apiKey} secret />
@@ -397,9 +388,7 @@ function SettingToggle({
           width: 48,
           height: 24,
           borderRadius: 999,
-          border: `1px solid ${
-            on ? theme.colors.activity.on : theme.colors.border
-          }`,
+          border: `1px solid ${on ? theme.colors.activity.on : theme.colors.border}`,
           background: on ? theme.colors.activity.on : "transparent",
           position: "relative",
           cursor: "pointer",
