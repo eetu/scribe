@@ -23,7 +23,6 @@ const LOCALES = [
   { code: "es", label: "ES (.es)" },
 ];
 
-// eslint-disable-next-line react-refresh/only-export-components
 function AccountsPage() {
   const theme = useTheme();
   const { data } = useSWR("/api/accounts", fetcher);
@@ -77,7 +76,6 @@ type Stage =
   | { kind: "done"; account_id: string }
   | { kind: "error"; message: string };
 
-// eslint-disable-next-line react-refresh/only-export-components
 function LinkAccount() {
   const theme = useTheme();
   const [locale, setLocale] = useState("us");
@@ -109,9 +107,7 @@ function LinkAccount() {
       {stage.kind === "idle" || stage.kind === "starting" ? (
         <>
           <label css={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span css={{ fontSize: 12, color: theme.colors.text.muted }}>
-              region
-            </span>
+            <span css={{ fontSize: 12, color: theme.colors.text.muted }}>region</span>
             <select
               value={locale}
               onChange={(e) => setLocale(e.target.value)}
@@ -204,11 +200,9 @@ function LinkAccount() {
               lineHeight: 1.5,
             }}
           >
-            <strong css={{ color: theme.colors.text.main }}>
-              looks broken, isn't.
-            </strong>{" "}
-            amazon often redirects to an error/blank page. that's the right page
-            — its URL contains the code we need.
+            <strong css={{ color: theme.colors.text.main }}>looks broken, isn't.</strong> amazon
+            often redirects to an error/blank page. that's the right page — its URL contains the
+            code we need.
           </p>
           <label css={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span css={{ fontSize: 12, color: theme.colors.text.muted }}>

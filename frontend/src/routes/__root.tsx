@@ -8,7 +8,6 @@ import Wordmark from "../components/Wordmark";
 
 export const Route = createRootRoute({ component: RootLayout });
 
-// eslint-disable-next-line react-refresh/only-export-components
 function RootLayout() {
   const theme = useTheme();
 

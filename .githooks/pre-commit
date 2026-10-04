@@ -9,9 +9,8 @@ if [[ -z "$STAGED" ]]; then
 fi
 
 if echo "$STAGED" | grep -q "^frontend/"; then
-  echo "→ frontend lint + format check..."
+  echo "→ frontend lint..."
   (cd "$ROOT/frontend" && yarn lint)
-  (cd "$ROOT/frontend" && yarn format)
 fi
 
 # backend, press, shared, shelf and e2e all live under the same cargo

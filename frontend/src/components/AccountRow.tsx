@@ -119,9 +119,7 @@ export default function AccountRow({ account }: Props) {
         </svg>
       </div>
 
-      <div
-        css={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}
-      >
+      <div css={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
         <div
           css={{
             display: "flex",
@@ -168,9 +166,7 @@ export default function AccountRow({ account }: Props) {
             </span>
           )}
         </div>
-        <span css={{ fontSize: 12, color: theme.colors.text.muted }}>
-          {account.email_masked}
-        </span>
+        <span css={{ fontSize: 12, color: theme.colors.text.muted }}>{account.email_masked}</span>
         <div
           css={{
             display: "flex",
@@ -187,21 +183,12 @@ export default function AccountRow({ account }: Props) {
             accent={accent}
             muted={account.active_jobs === 0}
           />
-          <Stat
-            label="synced"
-            value={relativeTime(account.last_synced_at)}
-            accent={accent}
-            muted
-          />
+          <Stat label="synced" value={relativeTime(account.last_synced_at)} accent={accent} muted />
         </div>
       </div>
 
       <div css={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <button
-          onClick={onRefresh}
-          disabled={busy !== null}
-          css={chipButton(theme)}
-        >
+        <button onClick={onRefresh} disabled={busy !== null} css={chipButton(theme)}>
           {busy === "refresh" ? "refreshing…" : "refresh"}
         </button>
         <button

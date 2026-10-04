@@ -12,9 +12,7 @@ import { darkTheme, lightTheme } from "./themes";
 
 export function Root({ children }: { children: React.ReactNode }) {
   const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
-  const [override, setOverride] = useState<ThemeOverride>(() =>
-    readThemeOverride(),
-  );
+  const [override, setOverride] = useState<ThemeOverride>(() => readThemeOverride());
 
   useEffect(() => {
     writeThemeOverride(override);

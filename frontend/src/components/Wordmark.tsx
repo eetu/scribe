@@ -31,13 +31,7 @@ export default function Wordmark({ size = 22, short = false }: WordmarkProps) {
         textDecoration: "none",
       }}
     >
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 64 64"
-        fill="none"
-        aria-hidden="true"
-      >
+      <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden="true">
         {/* Closed book outline. */}
         <rect
           x="12"
@@ -89,9 +83,7 @@ export default function Wordmark({ size = 22, short = false }: WordmarkProps) {
         }}
       >
         {short ? null : (
-          <span css={{ [mq[0]]: { display: "none" } }}>
-            the path of the righteous{" "}
-          </span>
+          <span css={{ [mq[0]]: { display: "none" } }}>the path of the righteous </span>
         )}
         scribe<span css={{ color: accent }}>.</span>
       </span>

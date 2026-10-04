@@ -5,7 +5,7 @@ Vite + React 19 + Emotion + TanStack Router (file-based) + SWR.
 ## Validation
 
 ```sh
-yarn validate    # lint + format + typecheck in one shot
+yarn validate    # typecheck + lint in one shot
 yarn dev         # vite dev server on :5173, proxies api/auth/status to :3003
 yarn build       # tsc + vite build → dist/
 ```
