@@ -15,7 +15,7 @@
   "dependencies": {
     "@anarkisti/igyb": "^0.5.0",
     "@emotion/react": "^11.14.0",
-    "@tanstack/react-router": "^1.170.40",
+    "@tanstack/react-router": "^1.170.41",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "swr": "^2.5.1",
@@ -24,13 +24,13 @@
   "devDependencies": {
     "@anarkisti/biome-config": "^1.0.0",
     "@biomejs/biome": "^2.5.15",
-    "@tanstack/router-plugin": "^1.168.41",
+    "@tanstack/router-plugin": "^1.168.42",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "babel-plugin-react-compiler": "^1.0.0",
     "typescript": "^6.0.3",
-    "vite": "^8.3.1"
+    "vite": "^8.3.2"
   },
   "packageManager": "yarn@4.16.0"
 }
