@@ -10,8 +10,8 @@ dependencies = [
   # need uvloop/httptools/websockets/watchfiles — dropping them cuts RSS +
   # image size on the 1 GB Pi. uvicorn falls back to asyncio + h11.
   "uvicorn>=0.54.0",
-  "cryptography>=50.0.1",
-  "python-dotenv>=1.2.3",
+  "cryptography>=50.0.2",
+  "python-dotenv>=1.2.4",
 ]
 
 [project.scripts]
@@ -22,7 +22,7 @@ shim = "shim.__main__:main"
 # project env via `uv run ruff` — previously the hook called a ruff that was
 # never installed, so it failed to spawn on every shim commit.
 [dependency-groups]
-dev = ["ruff>=0.16.9"]
+dev = ["ruff>=0.16.10"]
 
 [tool.uv]
 package = true
