@@ -16,8 +16,8 @@
     "@anarkisti/igyb": "^0.5.0",
     "@emotion/react": "^11.14.0",
     "@tanstack/react-router": "^1.170.42",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "swr": "^2.5.1",
     "usehooks-ts": "^3.1.1"
   },
