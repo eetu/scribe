@@ -1214,12 +1214,14 @@ async fn serve_local_file(
 ) -> Result<axum::response::Response, AppError> {
     let mut svc = tower_http::services::ServeFile::new_with_mime(path, content_type);
     // `try_call` reports real io failures (EIO, a NAS mount that vanished) as
-    // errors; a missing or unreadable file it answers with a bare 404, which
-    // we re-raise as our own so the error shape stays consistent.
-    let resp = svc
-        .try_call(req)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    // errors; a missing file yields ErrorKind::NotFound (or a 404 response on
+    // older tower-http), which we re-raise as our own so the error shape stays
+    // consistent.
+    let resp = match svc.try_call(req).await {
+        Ok(resp) => resp,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
+        Err(e) => return Err(AppError::Internal(anyhow::anyhow!(e))),
+    };
     if resp.status() == axum::http::StatusCode::NOT_FOUND {
         return Err(AppError::NotFound);
     }
