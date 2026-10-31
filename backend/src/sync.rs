@@ -32,6 +32,42 @@ pub async fn incremental(state: &AppState, account_id: &str) -> Result<SyncRepor
     walk(state, account_id, Some(10)).await
 }
 
+/// Re-sync a single book: page through the account's library until `asin`
+/// turns up and upsert just that row. Used to restore a tombstoned book
+/// immediately — clears the tombstone when found so upsert doesn't skip it.
+/// If Audible sync fails (e.g. shim down) or the book is not found, the
+/// tombstone is preserved. Returns false when Audible no longer lists the
+/// asin for this account (returned, Plus rotation). Does not stamp
+/// `last_synced_at`.
+pub async fn one(state: &AppState, account_id: &str, asin: &str) -> Result<bool, AppError> {
+    let shim = ShimClient::new(state);
+    let page_size: u64 = 100;
+    let mut page: u64 = 1;
+    loop {
+        let resp = shim.library(account_id, page, page_size, None).await?;
+        if let Some(book) = resp.items.iter().find(|b| b.asin == asin) {
+            let acct = account_id.to_string();
+            let a = asin.to_string();
+            state
+                .db
+                .with(move |c| {
+                    c.execute(
+                        "DELETE FROM removed_books WHERE asin = ?1 AND account_id = ?2",
+                        rusqlite::params![a, acct],
+                    )?;
+                    Ok(())
+                })
+                .await?;
+            upsert(state, account_id, book).await?;
+            return Ok(true);
+        }
+        if (resp.items.len() as u64) < page_size || page * page_size >= resp.total_results {
+            return Ok(false);
+        }
+        page += 1;
+    }
+}
+
 async fn walk(
     state: &AppState,
     account_id: &str,

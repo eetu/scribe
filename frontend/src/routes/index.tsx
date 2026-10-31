@@ -3,9 +3,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 
-import { api, audioUrl, type Book, type Job } from "../api";
+import { api, audioUrl, type Book, type Job, type RemovedBook } from "../api";
 import BookCard from "../components/BookCard";
 import EmptyShelfBackground from "../components/EmptyShelfBackground";
+import RemovedCard from "../components/RemovedCard";
 
 const ACTIVE_JOB_PHASES = new Set([
   "queued",
@@ -16,6 +17,9 @@ const ACTIVE_JOB_PHASES = new Set([
 ]);
 
 type FilterKey = "all" | "done" | "failed" | "unavailable" | "missing" | "in_progress" | "new";
+// "removed" isn't a job bucket — it switches the grid to tombstoned books
+// (their `books` row is gone), so it lives outside FilterKey.
+type ViewKey = FilterKey | "removed";
 type SortKey = "title" | "author" | "added" | "status";
 
 function bucket(job: Job | null): Exclude<FilterKey, "all"> {
@@ -47,6 +51,7 @@ const fetcher = () => api.library();
 const accountsFetcher = () => api.accounts();
 const jobsFetcher = () => api.jobs();
 const meFetcher = () => api.me();
+const removedFetcher = () => api.removedBooks();
 
 // Run an action, surfacing any failure instead of swallowing it — without a
 // catch a 401/503/timeout left the button enabled and the user re-clicking
@@ -67,8 +72,12 @@ function LibraryPage() {
     refreshInterval: 5000,
   });
   const { data: me } = useSWR("/api/me", meFetcher);
+  // Tombstones only change on user action (remove / restore / purge), each
+  // of which mutates this key — no polling needed.
+  const { data: removedData } = useSWR("/api/library/removed", removedFetcher);
   const [syncing, setSyncing] = useState(false);
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [filter, setFilter] = useState<ViewKey>("all");
+  const [restoring, setRestoring] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("title");
   // Per-asin cache-buster so a refreshed cover reloads past the browser's
   // long-lived image cache (the cover endpoint sets max-age).
@@ -144,10 +153,13 @@ function LibraryPage() {
   };
 
   const items: Book[] = useMemo(() => data?.items ?? [], [data]);
+  const removed: RemovedBook[] = removedData?.items ?? [];
 
   if (isLoading) return null;
 
-  if (items.length === 0) {
+  // Keep the page reachable when every book was removed, so the removed
+  // view (and restore) is still one click away.
+  if (items.length === 0 && removed.length === 0) {
     // Empty shelf: a scribe-style panel with a whisper-subtle book field behind
     // the message (EmptyShelfBackground). It renders only in this branch, so it
     // never sits behind the populated grid below.
@@ -415,6 +427,15 @@ function LibraryPage() {
                 {label} {counts[key]}
               </button>
             ))}
+          {(removed.length > 0 || filter === "removed") && (
+            <button
+              onClick={() => setFilter("removed")}
+              css={filterChip(theme, filter === "removed")}
+              title="books you removed — restore brings one back from audible"
+            >
+              removed {removed.length}
+            </button>
+          )}
         </div>
         <select
           value={sort}
@@ -443,67 +464,112 @@ function LibraryPage() {
           gap: 16,
         }}
       >
-        {visible.map((b) => (
-          <BookCard
-            key={`${b.account_id}:${b.asin}`}
-            book={b}
-            job={jobByAsin.get(b.asin) ?? null}
-            duplicateOf={dupesByAsin.get(b.asin)}
-            dupeBetterKbps={betterDupeKbps.get(b.asin)}
-            region={b.region}
-            showStatusBand={filter === "all"}
-            canPlay={shelfReady && buckets.get(b.asin) === "done"}
-            isPlaying={playingAsin === b.asin}
-            progress={playingAsin === b.asin ? progress : 0}
-            onTogglePlay={() => togglePlay(b)}
-            onScrub={(f) => scrubTo(b, f)}
-            coverBust={coverBust[b.asin]}
-            onRefresh={
-              buckets.get(b.asin) === "done"
-                ? () =>
-                    guard("refresh", async () => {
-                      await api.refreshBook(b.asin);
-                      setCoverBust((prev) => ({
-                        ...prev,
-                        [b.asin]: Date.now(),
-                      }));
-                      mutate("/api/library");
-                      mutate("/api/jobs");
-                    })
-                : undefined
-            }
-            onDownload={() =>
-              guard("download", async () => {
-                await api.enqueueJob({
-                  account_id: b.account_id,
-                  asin: b.asin,
-                });
-                mutate("/api/jobs");
-              })
-            }
-            onReconvert={() =>
-              guard("reconvert", async () => {
-                const j = jobByAsin.get(b.asin);
-                if (!j) return;
-                await api.reconvertJob(j.id);
-                mutate("/api/jobs");
-              })
-            }
-            onRemove={() => {
-              if (
-                !confirm(
-                  `remove "${b.title}" from scribe?\n\nthe library and source files stay on disk — only scribe's record is removed. it won't come back unless you re-buy it on audible.`,
+        {filter === "removed" &&
+          removed.map((r) => (
+            <RemovedCard
+              key={`${r.account_id}:${r.asin}`}
+              book={r}
+              busy={restoring === r.asin}
+              onRestore={() => {
+                setRestoring(r.asin);
+                void guard("restore", async () => {
+                  const res = await api.restoreBook(r.asin);
+                  mutate("/api/library/removed");
+                  mutate("/api/library");
+                  mutate("/api/jobs");
+                  // Reconcile runs detached after restore and may re-adopt
+                  // files on disk as a done job; pick that up shortly.
+                  setTimeout(() => mutate("/api/jobs"), 4000);
+                  if (res.errors.length > 0) {
+                    alert(
+                      `tombstone cleared, but the audible sync failed — the next refresh will pick it up.\n\n${res.errors.join("\n")}`,
+                    );
+                  } else if (res.found === 0) {
+                    alert(
+                      `tombstone cleared, but audible no longer lists "${r.title ?? r.asin}" on this account.`,
+                    );
+                  }
+                }).finally(() => setRestoring(null));
+              }}
+            />
+          ))}
+        {filter !== "removed" &&
+          visible.map((b) => (
+            <BookCard
+              key={`${b.account_id}:${b.asin}`}
+              book={b}
+              job={jobByAsin.get(b.asin) ?? null}
+              duplicateOf={dupesByAsin.get(b.asin)}
+              dupeBetterKbps={betterDupeKbps.get(b.asin)}
+              region={b.region}
+              showStatusBand={filter === "all"}
+              canPlay={shelfReady && buckets.get(b.asin) === "done"}
+              isPlaying={playingAsin === b.asin}
+              progress={playingAsin === b.asin ? progress : 0}
+              onTogglePlay={() => togglePlay(b)}
+              onScrub={(f) => scrubTo(b, f)}
+              coverBust={coverBust[b.asin]}
+              onRefresh={
+                buckets.get(b.asin) === "done"
+                  ? () =>
+                      guard("refresh", async () => {
+                        await api.refreshBook(b.asin);
+                        setCoverBust((prev) => ({
+                          ...prev,
+                          [b.asin]: Date.now(),
+                        }));
+                        mutate("/api/library");
+                        mutate("/api/jobs");
+                      })
+                  : undefined
+              }
+              onDownload={() =>
+                guard("download", async () => {
+                  await api.enqueueJob({
+                    account_id: b.account_id,
+                    asin: b.asin,
+                  });
+                  mutate("/api/jobs");
+                })
+              }
+              onReconvert={() =>
+                guard("reconvert", async () => {
+                  const j = jobByAsin.get(b.asin);
+                  if (!j) return;
+                  await api.reconvertJob(j.id);
+                  mutate("/api/jobs");
+                })
+              }
+              onRemove={() => {
+                if (
+                  !confirm(
+                    `remove "${b.title}" from scribe?\n\nthe library and source files stay on disk — only scribe's record is removed. it won't come back unless you re-buy it on audible.`,
+                  )
                 )
-              )
-                return;
-              void guard("remove", async () => {
-                await api.removeBook(b.asin);
-                mutate("/api/library");
-                mutate("/api/jobs");
-              });
-            }}
-          />
-        ))}
+                  return;
+                void guard("remove", async () => {
+                  await api.removeBook(b.asin);
+                  mutate("/api/library");
+                  mutate("/api/jobs");
+                  mutate("/api/library/removed");
+                });
+              }}
+              onPurge={() => {
+                if (
+                  !confirm(
+                    `purge "${b.title}" from scribe?\n\nforgets the book and its jobs without tombstoning it. the next refresh re-adds it from audible and a download fetches fresh keys. files on disk stay.`,
+                  )
+                )
+                  return;
+                void guard("purge", async () => {
+                  await api.purgeBook(b.asin);
+                  mutate("/api/library");
+                  mutate("/api/jobs");
+                  mutate("/api/library/removed");
+                });
+              }}
+            />
+          ))}
       </div>
     </>
   );

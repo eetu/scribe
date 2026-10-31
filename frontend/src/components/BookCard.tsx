@@ -12,6 +12,10 @@ type Props = {
   /** Drop the book from scribe's tracking. Files on disk are kept; the
    * caller confirms before this fires. */
   onRemove: () => void;
+  /** Forget the book entirely (no tombstone) so the next library refresh
+   * re-adds it fresh and a download fetches new keys. Offered on error
+   * states (failed / unavailable / missing); caller confirms. */
+  onPurge?: () => void;
   /** ASINs of other library rows sharing this title + primary author.
    * Surfaced as a small "dupe" badge so the user can decide whether to
    * download both editions or skip one. Empty when no overlap. */
@@ -52,6 +56,7 @@ export default function BookCard({
   onDownload,
   onReconvert,
   onRemove,
+  onPurge,
   duplicateOf = [],
   dupeBetterKbps,
   region,
@@ -404,7 +409,17 @@ export default function BookCard({
               </span>
             )}
           </div>
-          <div css={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div
+            css={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              // Error states can stack remove + purge + download +
+              // re-convert; wrap rather than overflow the card.
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+            }}
+          >
             {onRefresh && (
               <button
                 onClick={onRefresh}
@@ -421,6 +436,15 @@ export default function BookCard({
             >
               remove
             </button>
+            {onPurge && status.tone === "err" && (
+              <button
+                onClick={onPurge}
+                css={removeButton(theme)}
+                title="forget this book completely — next refresh re-adds it and a download fetches fresh keys"
+              >
+                purge
+              </button>
+            )}
             {status.canEnqueue && (
               <button onClick={onDownload} css={cardActionButton(theme)}>
                 download

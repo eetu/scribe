@@ -66,6 +66,19 @@ export type Book = {
   channels: number | null;
 };
 
+/** A tombstoned (user-removed) book. title/authors/cover_url are a
+ * snapshot from removal time; null title on tombstones that predate it. */
+export type RemovedBook = {
+  asin: string;
+  account_id: string;
+  /** ISO 8601 UTC. */
+  removed_at: string;
+  title: string | null;
+  authors: string[];
+  cover_url: string | null;
+  region: string | null;
+};
+
 export type Job = {
   id: string;
   asin: string;
@@ -185,6 +198,19 @@ export const api = {
     req<{ removed: boolean; books_deleted: number; jobs_deleted: number }>(
       `/api/books/${encodeURIComponent(asin)}`,
       { method: "DELETE" },
+    ),
+  purgeBook: (asin: string) =>
+    req<{
+      purged: boolean;
+      books_deleted: number;
+      jobs_deleted: number;
+      tombstones_cleared: number;
+    }>(`/api/books/${encodeURIComponent(asin)}/purge`, { method: "POST" }),
+  removedBooks: () => req<{ items: RemovedBook[] }>("/api/library/removed"),
+  restoreBook: (asin: string) =>
+    req<{ restored: number; found: number; errors: string[] }>(
+      `/api/books/${encodeURIComponent(asin)}/restore`,
+      { method: "POST" },
     ),
   refreshBook: (asin: string) =>
     req<{ refreshed: number }>(`/api/books/${encodeURIComponent(asin)}/refresh`, {
