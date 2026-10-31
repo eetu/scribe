@@ -871,10 +871,11 @@ async fn serve_file_validated(
     // gone away reads as a 500. A missing or unreadable file is not in that
     // set — tower-http answers those with its own bare 404, which we re-raise
     // below so clients only ever see shelf's JSON error shape.
-    let served = svc
-        .try_call(rebuild_without_body(&parts, true))
-        .await
-        .map_err(ShelfError::from)?;
+    let served = match svc.try_call(rebuild_without_body(&parts, true)).await {
+        Ok(resp) => resp,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(ShelfError::NotFound),
+        Err(e) => return Err(ShelfError::from(e)),
+    };
     if served.status() == StatusCode::NOT_FOUND {
         return Err(ShelfError::NotFound);
     }
@@ -894,10 +895,13 @@ async fn serve_file_validated(
                 // Dropping `served` drops a file handle whose body was never
                 // polled, so the stale attempt costs one open() and a seek.
                 drop(served);
-                let full = svc
-                    .try_call(rebuild_without_body(&parts, false))
-                    .await
-                    .map_err(ShelfError::from)?;
+                let full = match svc.try_call(rebuild_without_body(&parts, false)).await {
+                    Ok(resp) => resp,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        return Err(ShelfError::NotFound)
+                    }
+                    Err(e) => return Err(ShelfError::from(e)),
+                };
                 return Ok(full.map(Body::new));
             }
         }
