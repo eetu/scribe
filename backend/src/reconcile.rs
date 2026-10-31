@@ -235,7 +235,9 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
 
     let id = Uuid::new_v4().to_string();
     let now = crate::util::now_iso();
-    let downloaded_at = sc.downloaded_at;
+    let created_at = chrono::DateTime::from_timestamp(sc.downloaded_at, 0)
+        .map(crate::util::to_iso)
+        .unwrap_or_else(crate::util::now_iso);
     let m4b_str = m4b.display().to_string();
     let aaxc_str = aaxc.display().to_string();
     state
@@ -244,7 +246,7 @@ async fn reconcile_one(state: &AppState, sidecar_path: &Path) -> anyhow::Result<
             c.execute(
                 "INSERT INTO jobs (id, asin, account_id, status, created_at, updated_at, m4b_path, aaxc_path)
                  VALUES (?1, ?2, ?3, 'done', ?4, ?5, ?6, ?7)",
-                rusqlite::params![id, asin, account, downloaded_at, now, m4b_str, aaxc_str],
+                rusqlite::params![id, asin, account, created_at, now, m4b_str, aaxc_str],
             )?;
             Ok(())
         })

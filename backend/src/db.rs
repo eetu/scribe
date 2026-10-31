@@ -76,6 +76,13 @@ impl Db {
             add_column_if_missing(conn, "books", col, decl)?;
         }
 
+        // Display snapshot on tombstones, so the "removed" view can show
+        // what a removed book was (its `books` row is gone). Tombstones
+        // written before these existed stay NULL — UI falls back to asin.
+        for col in ["title", "authors_json", "cover_url"] {
+            add_column_if_missing(conn, "removed_books", col, "TEXT")?;
+        }
+
         // Legacy columns from the pre-kanidm schema (admin/user split) —
         // dropped now that kanidm is the bouncer. Existence-checked so
         // this is a no-op on fresh installs and after the first drop.
@@ -159,7 +166,9 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> anyhow::Result
 // `*.scribe.json` sidecar (kept on disk for its durable voucher) would
 // otherwise let the boot reconcile pass resurrect the job — reconcile
 // skips tombstoned asins, while library sync clears the tombstone if
-// Audible lists the title again (a genuine re-purchase).
+// Audible lists the title again (a genuine re-purchase). Its title /
+// authors_json / cover_url are a display snapshot taken at removal time,
+// and the user can restore a tombstoned book from the UI.
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -228,6 +237,9 @@ CREATE TABLE IF NOT EXISTS removed_books (
   asin TEXT NOT NULL,
   account_id TEXT NOT NULL,
   removed_at TEXT NOT NULL,
+  title TEXT,
+  authors_json TEXT,
+  cover_url TEXT,
   PRIMARY KEY (asin, account_id)
 );
 "#;

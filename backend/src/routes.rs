@@ -49,9 +49,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/library/sync", post(sync_library))
         .route("/api/library/reconcile", post(reconcile_route))
         .route("/api/library/refresh", post(refresh_library))
+        .route("/api/library/removed", get(list_removed))
         .route("/api/books/{asin}", delete(remove_book))
         .route("/api/books/{asin}/cover", get(book_cover))
         .route("/api/books/{asin}/refresh", post(refresh_book))
+        .route("/api/books/{asin}/purge", post(purge_book))
+        .route("/api/books/{asin}/restore", post(restore_book))
         .route("/api/jobs", get(list_jobs).post(enqueue_job))
         .route("/api/jobs/enqueue_all", post(enqueue_all))
         .route("/api/jobs/{id}/sse", get(job_sse))
@@ -492,7 +495,9 @@ async fn list_jobs(user: AuthProfile, State(state): State<AppState>) -> AppResul
         .db
         .with(move |c| {
             let mut stmt = c.prepare(
-                "SELECT j.id, j.asin, j.account_id, j.status, j.created_at, j.updated_at,
+                "SELECT j.id, j.asin, j.account_id, j.status,
+                        CASE WHEN typeof(j.created_at) = 'integer' THEN strftime('%Y-%m-%dT%H:%M:%SZ', j.created_at, 'unixepoch') ELSE j.created_at END,
+                        CASE WHEN typeof(j.updated_at) = 'integer' THEN strftime('%Y-%m-%dT%H:%M:%SZ', j.updated_at, 'unixepoch') ELSE j.updated_at END,
                         j.error, j.m4b_path, j.aaxc_path
                  FROM jobs j
                  JOIN accounts a ON a.id = j.account_id
@@ -676,15 +681,20 @@ async fn remove_book(
         .with(move |c| {
             // Tombstone every (asin, account) the caller owns that has a
             // book or job row, before deleting. Scope through accounts so
-            // one user can't remove another's books.
+            // one user can't remove another's books. Snapshot title,
+            // authors and cover_url from the books row (when there is
+            // one) so the removed view can still show what this was.
             let now = crate::util::now_iso();
             c.execute(
-                "INSERT OR IGNORE INTO removed_books (asin, account_id, removed_at)
-                 SELECT DISTINCT ?1, account_id, ?2 FROM (
+                "INSERT OR IGNORE INTO removed_books
+                   (asin, account_id, removed_at, title, authors_json, cover_url)
+                 SELECT ?1, t.account_id, ?2, b.title, b.authors_json, b.cover_url
+                 FROM (
                      SELECT account_id FROM books WHERE asin = ?1
                      UNION SELECT account_id FROM jobs WHERE asin = ?1
-                 )
-                 WHERE account_id IN (SELECT id FROM accounts WHERE profile_id = ?3)",
+                 ) t
+                 LEFT JOIN books b ON b.asin = ?1 AND b.account_id = t.account_id
+                 WHERE t.account_id IN (SELECT id FROM accounts WHERE profile_id = ?3)",
                 rusqlite::params![asin, now, pid],
             )?;
             let jobs_deleted = c.execute(
@@ -708,6 +718,283 @@ async fn remove_book(
         "books_deleted": books_deleted,
         "jobs_deleted": jobs_deleted,
     })))
+}
+
+/// Purge a book: forget it completely so the next library refresh treats
+/// it as a brand-new purchase. Unlike `remove_book` this does NOT tombstone
+/// — it clears any existing tombstone instead — so sync re-inserts the row
+/// from Audible and a fresh download fetches a new voucher (key + iv) from
+/// the shim. Recovery path for a download that failed on a just-bought
+/// title (license not yet issued → "unavailable", which offers no retry).
+///
+/// In-flight jobs for the asin are cancelled first so the worker doesn't
+/// keep running against rows that no longer exist. Files on disk are left
+/// alone, same as `remove_book`: a re-download of the same asin overwrites
+/// in place (sidecar asin match) and rewrites the sidecar with the new
+/// voucher.
+async fn purge_book(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Path(asin): Path<String>,
+) -> AppResult<Json<Value>> {
+    let pid = user.id();
+
+    let asin_q = asin.clone();
+    let active: Vec<String> = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT id FROM jobs WHERE asin = ?1
+                 AND status NOT IN ('done', 'failed', 'cancelled')
+                 AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)",
+            )?;
+            let v = stmt
+                .query_map(rusqlite::params![asin_q, pid], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+        .await?;
+    for id in active.iter().filter_map(|s| Uuid::parse_str(s).ok()) {
+        if let Err(e) = state.queue().cancel(id).await {
+            tracing::warn!(job_id = %id, error = ?e, "purge: cancel failed");
+        }
+    }
+
+    let asin_q = asin.clone();
+    let (books_deleted, jobs_deleted, tombstones_cleared) = state
+        .db
+        .with(move |c| {
+            // Scope every delete through accounts so one user can't purge
+            // another's books.
+            let jobs_deleted = c.execute(
+                "DELETE FROM jobs WHERE asin = ?1
+                 AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)",
+                rusqlite::params![asin_q, pid],
+            )?;
+            let books_deleted = c.execute(
+                "DELETE FROM books WHERE asin = ?1
+                 AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)",
+                rusqlite::params![asin_q, pid],
+            )?;
+            let tombstones_cleared = c.execute(
+                "DELETE FROM removed_books WHERE asin = ?1
+                 AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)",
+                rusqlite::params![asin_q, pid],
+            )?;
+            Ok((books_deleted, jobs_deleted, tombstones_cleared))
+        })
+        .await?;
+    if books_deleted == 0 && jobs_deleted == 0 && tombstones_cleared == 0 {
+        return Err(AppError::NotFound);
+    }
+    tracing::info!(
+        %asin,
+        profile = pid,
+        books_deleted,
+        jobs_deleted,
+        tombstones_cleared,
+        "book purged"
+    );
+    Ok(Json(json!({
+        "purged": true,
+        "books_deleted": books_deleted,
+        "jobs_deleted": jobs_deleted,
+        "tombstones_cleared": tombstones_cleared,
+    })))
+}
+
+/// Tombstoned books for the caller's accounts, newest removal first. The
+/// title/authors/cover_url are the snapshot taken at removal; tombstones
+/// predating the snapshot columns carry nulls (UI shows the asin).
+async fn list_removed(user: AuthProfile, State(state): State<AppState>) -> AppResult<Json<Value>> {
+    let pid = user.id();
+    let rows = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT r.asin, r.account_id, r.removed_at, r.title, r.authors_json,
+                        r.cover_url, a.locale
+                 FROM removed_books r
+                 JOIN accounts a ON a.id = r.account_id
+                 WHERE a.profile_id = ?1
+                 ORDER BY r.removed_at DESC",
+            )?;
+            let rows = stmt
+                .query_map([pid], |r| {
+                    let authors = r
+                        .get::<_, Option<String>>(4)?
+                        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+                        .unwrap_or_default();
+                    Ok(json!({
+                        "asin": r.get::<_, String>(0)?,
+                        "account_id": r.get::<_, String>(1)?,
+                        "removed_at": r.get::<_, String>(2)?,
+                        "title": r.get::<_, Option<String>>(3)?,
+                        "authors": authors,
+                        "cover_url": r.get::<_, Option<String>>(5)?,
+                        "region": r.get::<_, Option<String>>(6)?,
+                    }))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await?;
+    Ok(Json(json!({ "items": rows })))
+}
+
+/// Restore a tombstoned book: re-sync just that asin from Audible so it
+/// reappears in the library right away (no waiting for the next refresh).
+/// When Audible confirms the title, the tombstone is cleared and an
+/// upsert brings it back into `books`.
+///
+/// If Audible sync fails (e.g. shim is down, offline, or unauthenticated),
+/// it falls back to restoring the book into `books` using the snapshot saved
+/// in `removed_books` (title, authors, cover). This ensures books with files
+/// already on disk can be restored and played even when the shim is not
+/// connected to an Audible account.
+///
+/// A detached reconcile pass follows on successful restore so a leftover
+/// sidecar re-adopts existing files as a done job instead of the book
+/// reading as "new".
+async fn restore_book(
+    user: AuthProfile,
+    State(state): State<AppState>,
+    Path(asin): Path<String>,
+) -> AppResult<Json<Value>> {
+    let pid = user.id();
+    let asin_q = asin.clone();
+    type TombstoneRecord = (String, Option<String>, Option<String>, Option<String>);
+    let records: Vec<TombstoneRecord> = state
+        .db
+        .with(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT r.account_id, r.title, r.authors_json, r.cover_url
+                 FROM removed_books r
+                 JOIN accounts a ON a.id = r.account_id
+                 WHERE r.asin = ?1 AND a.profile_id = ?2",
+            )?;
+            let v = stmt
+                .query_map(rusqlite::params![asin_q, pid], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+        .await?;
+    if records.is_empty() {
+        return Err(AppError::NotFound);
+    }
+
+    let mut found = 0usize;
+    let mut errors = Vec::new();
+    for (acct, title, authors_json, cover_url) in &records {
+        match sync::one(&state, acct, &asin).await {
+            Ok(true) => found += 1,
+            Ok(false) => {
+                // Audible doesn't list the book (e.g. catalog rotation).
+                // Fall back to restoring from local snapshot if we have a title.
+                if let Some(t) = title {
+                    if restore_from_snapshot(
+                        &state,
+                        acct,
+                        &asin,
+                        t,
+                        authors_json.as_deref(),
+                        cover_url.as_deref(),
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        found += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(%asin, account = %acct, error = ?e, "restore sync from audible failed, attempting local fallback");
+                errors.push(format!("{acct}: {e}"));
+                // Fall back to restoring from local snapshot so books with existing files on disk
+                // can be restored even when shim is down or not connected to any account.
+                if let Some(t) = title {
+                    if restore_from_snapshot(
+                        &state,
+                        acct,
+                        &asin,
+                        t,
+                        authors_json.as_deref(),
+                        cover_url.as_deref(),
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        found += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if found == 0 && !errors.is_empty() {
+        return Err(AppError::Upstream(errors.join("; ")));
+    }
+
+    if found > 0 {
+        let st = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::reconcile::scan(&st).await {
+                tracing::warn!(error = ?e, "post-restore reconcile failed");
+            }
+        });
+    }
+
+    tracing::info!(%asin, profile = pid, accounts = records.len(), found, "book restored");
+    Ok(Json(json!({
+        "restored": found,
+        "found": found,
+        "errors": errors,
+    })))
+}
+
+async fn restore_from_snapshot(
+    state: &AppState,
+    account_id: &str,
+    asin: &str,
+    title: &str,
+    authors_json: Option<&str>,
+    cover_url: Option<&str>,
+) -> Result<(), AppError> {
+    let now = crate::util::now_iso();
+    let aid = account_id.to_string();
+    let a = asin.to_string();
+    let t = title.to_string();
+    let authors = authors_json.unwrap_or("[]").to_string();
+    let cover = cover_url.map(|s| s.to_string());
+    state
+        .db
+        .with(move |c| {
+            c.execute(
+                "INSERT INTO books (
+                   asin, account_id, title, authors_json, narrators_json, cover_url,
+                   status, first_seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, '[]', ?5, 'Active', ?6)
+                 ON CONFLICT(asin, account_id) DO UPDATE SET
+                   title = excluded.title,
+                   authors_json = excluded.authors_json,
+                   cover_url = excluded.cover_url",
+                rusqlite::params![a, aid, t, authors, cover, now],
+            )?;
+            c.execute(
+                "DELETE FROM removed_books WHERE asin = ?1 AND account_id = ?2",
+                rusqlite::params![a, aid],
+            )?;
+            Ok(())
+        })
+        .await?;
+    Ok(())
 }
 
 /// Refresh one book in place: force a fresh cover download (a CDN URL may
@@ -810,6 +1097,12 @@ async fn book_cover(
         .with(move |c| {
             c.query_row(
                 "SELECT cover_url FROM books
+                 WHERE asin = ?1
+                   AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)
+                 UNION ALL
+                 -- Tombstoned books keep their cover visible in the
+                 -- removed view; the snapshot carries the cover_url.
+                 SELECT cover_url FROM removed_books
                  WHERE asin = ?1
                    AND account_id IN (SELECT id FROM accounts WHERE profile_id = ?2)
                  LIMIT 1",

@@ -27,12 +27,19 @@ dev:
         done
     }
     trap cleanup INT TERM EXIT
-    ( cd shim && exec uv run uvicorn shim.main:app --host 127.0.0.1 --port 3004 ) &
+    ( cd shim && exec uv run uvicorn shim.main:app --reload --reload-dir src --host 127.0.0.1 --port 3004 ) &
     pids="$pids $!"
-    ( cd backend && DEV_AUTH=1 exec cargo run -p scribe-backend ) &
-    pids="$pids $!"
-    ( cd press && exec cargo run -p scribe-press ) &
-    pids="$pids $!"
+    if command -v bacon >/dev/null 2>&1; then
+        ( cd backend && DEV_AUTH=1 exec bacon -j run --headless ) &
+        pids="$pids $!"
+        ( cd press && exec bacon -j run --headless ) &
+        pids="$pids $!"
+    else
+        ( cd backend && DEV_AUTH=1 exec cargo run -p scribe-backend ) &
+        pids="$pids $!"
+        ( cd press && exec cargo run -p scribe-press ) &
+        pids="$pids $!"
+    fi
     ( cd frontend && exec {{yarn}} dev ) &
     pids="$pids $!"
     wait

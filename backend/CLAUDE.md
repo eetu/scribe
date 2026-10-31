@@ -26,9 +26,12 @@ Mirrors `router()` in `src/routes.rs` — keep them in step.
 | POST | `/api/library/sync` | manual refresh trigger (full paginated walk) |
 | POST | `/api/library/reconcile` | reconcile DB against what's on the NAS |
 | POST | `/api/library/refresh` | re-fetch metadata for the whole library |
+| GET | `/api/library/removed` | tombstoned books (snapshot title/authors/cover) |
 | DELETE | `/api/books/{asin}` | remove book + tombstone it in `removed_books` |
 | GET | `/api/books/{asin}/cover` | cached cover bytes, ETag + 304 |
 | POST | `/api/books/{asin}/refresh` | re-fetch metadata for one book |
+| POST | `/api/books/{asin}/purge` | forget book + jobs, clear tombstone — next sync re-adds it fresh |
+| POST | `/api/books/{asin}/restore` | clear tombstone + re-sync that one book now (then detached reconcile) |
 | GET | `/api/jobs` | recent jobs + active queue |
 | POST | `/api/jobs` | enqueue download of a specific asin |
 | POST | `/api/jobs/enqueue_all` | queue every Active book with no job row |
