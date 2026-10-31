@@ -57,11 +57,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run ruff check src
-      # Smoke-import the FastAPI app so a broken module surfaces in CI
-      # before reaching the deploy step. Routes are exercised against
-      # real Audible in the periodic smoke test, not here.
-      - run: SHIM_DEV=1 uv run python -c "from shim.main import app; assert len(app.routes) > 5"
+      - run: uv run ruff check src tests
+      - run: SHIM_DEV=1 uv run pytest
 
   e2e:
     name: "E2E smoke (stack boots + talks)"

@@ -54,13 +54,14 @@ check:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo fmt --all -- --check
     cd frontend && {{yarn}} validate
-    cd shim && uv run ruff check src
+    cd shim && uv run ruff check src tests
 
-# Unit tests (rust workspace; the SPA has no unit suite). Skips e2e.
+# Unit tests (rust workspace + python shim; the SPA has no unit suite). Skips e2e.
 test:
     # The e2e smoke suite is #[ignore]d, so `cargo test` walks straight past
     # it however broad the filter looks. `just e2e` is the way in.
     cargo test --workspace
+    cd shim && SHIM_DEV=1 uv run pytest
 
 # E2E smoke: boots backend + shim + press + shelf for real, then probes them.
 e2e:
