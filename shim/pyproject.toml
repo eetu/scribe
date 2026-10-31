@@ -2,9 +2,9 @@
 name = "shim"
 version = "0.1.0"
 description = "Audible auth + library + voucher sidecar wrapping mkb79/audible"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-  "audible>=0.10.0",
+  "audible>=0.13.1",
   "fastapi>=0.143.5",
   # Plain uvicorn (not [standard]): the loopback, low-QPS sidecar doesn't
   # need uvloop/httptools/websockets/watchfiles — dropping them cuts RSS +
@@ -22,7 +22,10 @@ shim = "shim.__main__:main"
 # project env via `uv run ruff` — previously the hook called a ruff that was
 # never installed, so it failed to spawn on every shim commit.
 [dependency-groups]
-dev = ["ruff>=0.17.1"]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.17.1",
+]
 
 [tool.uv]
 package = true
